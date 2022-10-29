@@ -15,16 +15,16 @@ import pyautogui
 import scipy.io as so
 import numpy as np
 import pandas as pd
-from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 import pdb
 # custom modules
 import sleepy
 import pwaves
 import AS
-from pqt_items import *
-from pqt_windows import FigureWindow
-from detect_emg_twitches import EMGTwitchWindow
+import pqt_items as pqi
+from pqt_plotwindow import FigureWindow
+from pqt_emgwindow import EMGTwitchWindow
 
 
 def get_cycles(ppath, name):
@@ -218,7 +218,7 @@ def downsample_sd(x, length, nbin, noise_idx=[], replace_nan=np.nan):
     return sd_dn
 
 
-class MainWindow(QtGui.QMainWindow):
+class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, ppath, name):
         """
         Instantiate main window, set initial variable values, load recording data
@@ -226,9 +226,10 @@ class MainWindow(QtGui.QMainWindow):
         ppath - base folder
         name - recording folder
         """
-        QtGui.QMainWindow.__init__(self)
+        QtWidgets.QMainWindow.__init__(self)
         self.WIDTH, self.HEIGHT = pyautogui.size()
         self.setGeometry(QtCore.QRect(100, 20, self.WIDTH, self.HEIGHT))
+        self.setWindowIcon(QtGui.QIcon("icons/pwave_icon.png"))
         self.ppath = ppath
         self.name  = name
         
@@ -333,7 +334,7 @@ class MainWindow(QtGui.QMainWindow):
             
             ### LIVE GRAPHS LAYOUT ###
             self.plotView = pg.GraphicsLayoutWidget(parent=self)
-            self.lay_brainstate  = self.plotView.addLayout() 
+            self.lay_brainstate = self.plotView.addLayout() 
             # laser / annotation history / current timepoint
             self.graph_treck = pg.PlotItem()
             self.lay_brainstate.addItem(self.graph_treck)
@@ -352,25 +353,30 @@ class MainWindow(QtGui.QMainWindow):
             self.graph_emgampl = self.lay_brainstate.addPlot()          
             self.plotView.nextRow()    
             # Live data visualization (Intan time; 1000+ Hz sampling rate)
-            self.arrowStart_btn = ArrowButton(parent=self)
-            self.arrowEnd_btn = ArrowButton(parent=self)
-            self.graph_eeg = GraphEEG(parent=self)
+            self.arrowStart_btn = pqi.ArrowButton(parent=self)
+            self.arrowEnd_btn = pqi.ArrowButton(parent=self)
+            self.graph_eeg = pqi.GraphEEG(parent=self)
             self.graph_eeg.vb.setMouseEnabled(x=True, y=True)
-            self.plotView.addItem(self.graph_eeg) 
+            self.plotView.addItem(self.graph_eeg)
             self.plotView.nextRow()
             # updatable plot items for viewing signals
             self.curData = pg.PlotDataItem()    # current Intan signal (LFP/EMG/EEG)
+            self.curData.setObjectName('current Intan signal')
             self.curData.setPen((255,255,255),width=1)
             self.curLaser = pg.PlotDataItem()   # current laser signal
+            self.curLaser.setObjectName('current laser train')
             self.curLaser.setPen((0,0,255),width=2.5)
             self.curDFF = pg.PlotDataItem()     # current DF/F signal
+            self.curDFF.setObjectName('current calcium signal')
             self.curDFF.setPen((255,255,0),width=2.5)
             self.curThres = pg.InfiniteLine()   # threshold value for P-wave detection
+            self.curThres.setObjectName('current P-wave threshold')
             self.curThres.setAngle(0)
             self.curThres.setPen((0,255,0),width=1)
             labelOpts = {'position': 0.08, 'color':(0,255,0), 'movable':True}
             self.curThres.label = pg.InfLineLabel(self.curThres, text='', **labelOpts)
             self.curIThres = pg.PlotDataItem()  # current timepoints used for thresholding
+            self.curIThres.setObjectName('current threshold calc. timepoints')
             self.curIThres.setPen((240,159,60),width=2.5)
             self.centralLayout.addWidget(self.plotView)
             
@@ -390,19 +396,18 @@ class MainWindow(QtGui.QMainWindow):
             font = QtGui.QFont()
             font.setPointSize(9)
             # set contents margins
-            cmargins = QtCore.QMargins(px_w(11, self.WIDTH),
-                                       px_h( 5, self.HEIGHT),
-                                       px_w(11, self.WIDTH),
-                                       px_h(20, self.HEIGHT))
+            cmargins = QtCore.QMargins(pqi.px_w(11, self.WIDTH),
+                                       pqi.px_h( 5, self.HEIGHT),
+                                       pqi.px_w(11, self.WIDTH),
+                                       pqi.px_h(20, self.HEIGHT))
             # get set of pixel widths and heights, standardized by monitor dimensions
-            titleHeight = px_h(30, self.HEIGHT)
-            wspace1, wspace5, wspace10, wspace15, wspace20 = [px_w(w, self.WIDTH) for w in [1,5,10,15,20]]
-            hspace1, hspace5, hspace10, hspace15, hspace20 = [px_h(h, self.HEIGHT) for h in [1,5,10,15,20]]
+            titleHeight = pqi.px_h(30, self.HEIGHT)
+            wspace1, wspace5, wspace10, wspace15, wspace20 = [pqi.px_w(w, self.WIDTH) for w in [1,5,10,15,20]]
+            hspace1, hspace5, hspace10, hspace15, hspace20 = [pqi.px_h(h, self.HEIGHT) for h in [1,5,10,15,20]]
             
             ### LFP processing params ###
             self.lfpWidget = QtWidgets.QWidget()
-            width1 = int(self.WIDTH * 0.0938)
-            self.lfpWidget.setFixedWidth(width1)
+            self.lfpWidget.setFixedWidth(pqi.px_w(180, self.WIDTH))
             self.lfpLayout = QtWidgets.QVBoxLayout(self.lfpWidget)
             self.lfpLayout.setContentsMargins(cmargins)
             self.lfpLayout.setSpacing(hspace10)
@@ -453,14 +458,13 @@ class MainWindow(QtGui.QMainWindow):
             lay1.addSpacing(hspace10)
             self.lfpLayout.addWidget(title1, stretch=0)
             self.lfpLayout.addLayout(lay1, stretch=2)
-            line_1 = vline()
+            line_1 = pqi.vline()
             self.settingsLayout.addWidget(self.lfpWidget)
             self.settingsLayout.addWidget(line_1)
             
             ### LFP thresholding params ###
             self.thresWidget = QtWidgets.QWidget()
-            width2 = int(self.WIDTH * 0.1615)
-            self.thresWidget.setFixedWidth(width2)
+            self.thresWidget.setFixedWidth(pqi.px_w(310, self.WIDTH))
             self.thresLayout = QtWidgets.QVBoxLayout(self.thresWidget)
             self.thresLayout.setContentsMargins(cmargins)
             self.thresLayout.setSpacing(hspace10)
@@ -493,7 +497,7 @@ class MainWindow(QtGui.QMainWindow):
                 val.setFont(font)
                 val.setSuffix(' s')
                 val.setDecimals(1)
-                val.setMaximumWidth(px_w(75,self.WIDTH))
+                val.setMaximumWidth(pqi.px_w(75,self.WIDTH))
                 self.thresStates[i+1] = [chk, val]
                 # add widgets to layout
                 c1.addWidget(chk, i+1, 0)
@@ -502,7 +506,7 @@ class MainWindow(QtGui.QMainWindow):
             c2 = QtWidgets.QVBoxLayout()
             c2.setSpacing(hspace20)
             c2r1_w = QtWidgets.QWidget()
-            c2r1_w.setFixedHeight(px_h(70,self.HEIGHT))
+            c2r1_w.setFixedHeight(pqi.px_h(70,self.HEIGHT))
             c2r1 = QtWidgets.QVBoxLayout(c2r1_w)  # P-wave threshold value + method
             c2r1.setContentsMargins(0,0,0,0)
             c2r1.setSpacing(hspace1)
@@ -521,8 +525,8 @@ class MainWindow(QtGui.QMainWindow):
             c2r1.addWidget(self.thresType)
             c2r1.addWidget(self.thres_val)
             c2r2 = QtWidgets.QGridLayout()  # use 1st X seconds of state
-            c2r2.setHorizontalSpacing(px_w(3, self.WIDTH))
-            c2r2.setVerticalSpacing(px_h(3, self.HEIGHT))
+            c2r2.setHorizontalSpacing(pqi.px_w(3, self.WIDTH))
+            c2r2.setVerticalSpacing(pqi.px_h(3, self.HEIGHT))
             self.thresFirst_btn = QtWidgets.QCheckBox('Use first')
             self.thresFirst_btn.setFont(font)
             self.thresFirst_label = QtWidgets.QLabel('    second(s) of state')
@@ -542,14 +546,13 @@ class MainWindow(QtGui.QMainWindow):
             lay2.addLayout(c2)
             self.thresLayout.addWidget(title2, stretch=0)
             self.thresLayout.addLayout(lay2, stretch=2)
-            line_2 = vline()
+            line_2 = pqi.vline()
             self.settingsLayout.addWidget(self.thresWidget)
             self.settingsLayout.addWidget(line_2)
             
             ### P-wave validation params ###
             self.pvalidWidget = QtWidgets.QWidget()
-            width3 = int(self.WIDTH * 0.1172)
-            self.pvalidWidget.setFixedWidth(width3)
+            self.pvalidWidget.setFixedWidth(pqi.px_w(225, self.WIDTH))
             self.pvalidLayout = QtWidgets.QVBoxLayout(self.pvalidWidget)
             self.pvalidLayout.setContentsMargins(cmargins)
             self.pvalidLayout.setSpacing(hspace10)
@@ -563,7 +566,7 @@ class MainWindow(QtGui.QMainWindow):
             r1 = QtWidgets.QHBoxLayout()
             r1.setSpacing(wspace15)
             r1c1_w = QtWidgets.QWidget()
-            r1c1_w.setFixedHeight(px_h(70,self.HEIGHT))
+            r1c1_w.setFixedHeight(pqi.px_h(70,self.HEIGHT))
             r1c1 = QtWidgets.QVBoxLayout(r1c1_w)  # amplitude threshold value + method
             r1c1.setContentsMargins(0,0,0,0)
             r1c1.setSpacing(hspace1)
@@ -579,7 +582,7 @@ class MainWindow(QtGui.QMainWindow):
             r1c1.addWidget(self.maxAmp_thresType)
             r1c1.addWidget(self.maxAmp_val)
             r1c2_w = QtWidgets.QWidget()
-            r1c2_w.setFixedHeight(px_h(70,self.HEIGHT))
+            r1c2_w.setFixedHeight(pqi.px_h(70,self.HEIGHT))
             r1c2 = QtWidgets.QVBoxLayout(r1c2_w)  # half-width threshold value + method
             r1c2.setContentsMargins(0,0,0,0)
             r1c2.setSpacing(hspace1)
@@ -611,14 +614,13 @@ class MainWindow(QtGui.QMainWindow):
             lay3.addLayout(r2)
             self.pvalidLayout.addWidget(title3, stretch=0)
             self.pvalidLayout.addLayout(lay3, stretch=2)
-            line_3 = vline()
+            line_3 = pqi.vline()
             self.settingsLayout.addWidget(self.pvalidWidget)
             self.settingsLayout.addWidget(line_3)
             
             ### Noise detection params ###
             self.noiseWidget = QtWidgets.QWidget()
-            width4 = int(self.WIDTH * 0.1146)
-            self.noiseWidget.setFixedWidth(width4)
+            self.noiseWidget.setFixedWidth(pqi.px_w(220, self.WIDTH))
             self.noiseLayout = QtWidgets.QVBoxLayout(self.noiseWidget)
             cmargins2 = QtCore.QMargins(cmargins.left(), cmargins.top(), 
                                         cmargins.right(), cmargins.top())
@@ -633,9 +635,9 @@ class MainWindow(QtGui.QMainWindow):
             self.noiseTitle4.setFont(headerFont)
             # buttons to view noise options for additional signals
             self.noiseOptions = ['LFP', 'EMG', 'EEG']
-            self.noiseBtns_bck = back_next_btns(parent=self, name='noiseBtns back')
+            self.noiseBtns_bck = pqi.back_next_btns(parent=self, name='noiseBtns back')
             self.noiseBtns_bck.setIconSize(QtCore.QSize(0,0))
-            self.noiseBtns_nxt = back_next_btns(parent=self, name='noiseBtns next')
+            self.noiseBtns_nxt = pqi.back_next_btns(parent=self, name='noiseBtns next')
             noiseTitle_row.addWidget(self.noiseBtns_bck, stretch=0, 
                                      alignment=QtCore.Qt.AlignCenter | QtCore.Qt.AlignLeft)
             noiseTitle_row.addWidget(self.noiseTitle4, stretch=2, 
@@ -646,7 +648,7 @@ class MainWindow(QtGui.QMainWindow):
             lay4.setContentsMargins(0,0,0,0)
             lay4.setSpacing(hspace10)
             r1_w = QtWidgets.QWidget()
-            r1_w.setFixedHeight(px_h(70,self.HEIGHT))
+            r1_w.setFixedHeight(pqi.px_h(70,self.HEIGHT))
             r1 = QtWidgets.QVBoxLayout(r1_w)  # noise threshold values + method
             r1.setContentsMargins(0,0,0,0)
             r1.setSpacing(hspace1)
@@ -714,26 +716,26 @@ class MainWindow(QtGui.QMainWindow):
             r3c1 = QtWidgets.QHBoxLayout()  # save vs. reset noise buttons
             r3c1.setSpacing(wspace5)
             btn_grp = QtWidgets.QButtonGroup(self.noiseWidget)
-            self.noiseReset_btn = update_noise_btn(top_parent=self, icon='reset',
-                                                   parent=self.noiseWidget)
-            self.noiseSave_btn = update_noise_btn(top_parent=self, icon='save',
-                                                  parent=self.noiseWidget)
+            self.noiseReset_btn = pqi.update_noise_btn(top_parent=self, icon='reset',
+                                                       parent=self.noiseWidget)
+            self.noiseSave_btn = pqi.update_noise_btn(top_parent=self, icon='save',
+                                                      parent=self.noiseWidget)
             btn_grp.addButton(self.noiseReset_btn)
             btn_grp.addButton(self.noiseSave_btn)
             # view EEG spectrogram with noise ignored (standard) or excluded
-            self.noiseCalcSP_btn = update_noise_btn(top_parent=self, icon='calc',
-                                                    parent=self.noiseWidget)
+            self.noiseCalcSP_btn = pqi.update_noise_btn(top_parent=self, icon='calc',
+                                                        parent=self.noiseWidget)
             self.noiseCalcSP_btn.hide()
             menu = QtWidgets.QMenu(self.noiseCalcSP_btn)
-            calcAction = QtGui.QAction('Calculate noise-excluded SP', self.noiseCalcSP_btn)
+            calcAction = QtWidgets.QAction('Calculate noise-excluded SP', self.noiseCalcSP_btn)
             calcAction.setObjectName('calculate noise')
             calcAction.triggered.connect(self.switchSP)
             menu.addAction(calcAction)
-            loadAction = QtGui.QAction('Load noise-excluded SP', self.noiseCalcSP_btn)
+            loadAction = QtWidgets.QAction('Load noise-excluded SP', self.noiseCalcSP_btn)
             loadAction.setObjectName('load noise')
             loadAction.triggered.connect(self.switchSP)
             menu.addAction(loadAction)
-            resetAction = QtGui.QAction('Load standard SP', self.noiseCalcSP_btn)
+            resetAction = QtWidgets.QAction('Load standard SP', self.noiseCalcSP_btn)
             resetAction.setObjectName('load standard')
             resetAction.triggered.connect(self.switchSP)
             menu.addAction(resetAction)
@@ -741,14 +743,15 @@ class MainWindow(QtGui.QMainWindow):
             r3c1.addWidget(self.noiseReset_btn)
             r3c1.addWidget(self.noiseSave_btn)
             r3c1.addWidget(self.noiseCalcSP_btn)
-            r3c1.addSpacerItem(QtWidgets.QSpacerItem(px_w(28,self.WIDTH),px_h(28,self.HEIGHT),
+            r3c1.addSpacerItem(QtWidgets.QSpacerItem(pqi.px_w(28,self.WIDTH), 
+                                                     pqi.px_h(28,self.HEIGHT),
                                                      QtWidgets.QSizePolicy.Maximum))
             r3c2 = QtWidgets.QHBoxLayout()    # noise viewing buttons
             r3c2.setContentsMargins(0,0,0,0)
             r3c2.setSpacing(wspace5)
-            btn = show_hide_event(parent=self)
-            bck = back_next_event(parent=self, name='noise back')
-            nxt = back_next_event(parent=self, name='noise next')
+            btn = pqi.show_hide_event(parent=self)
+            bck = pqi.back_next_event(parent=self, name='noise back')
+            nxt = pqi.back_next_event(parent=self, name='noise next')
             bck.setEnabled(False)
             nxt.setEnabled(False)
             self.noiseShow_btn = [btn,bck,nxt]
@@ -763,14 +766,13 @@ class MainWindow(QtGui.QMainWindow):
             lay4.addLayout(r3)
             self.noiseLayout.addLayout(noiseTitle_row, stretch=0)
             self.noiseLayout.addLayout(lay4, stretch=2)
-            line_4 = vline()
+            line_4 = pqi.vline()
             self.settingsLayout.addWidget(self.noiseWidget)
             self.settingsLayout.addWidget(line_4)
             
             ### Artifact viewing params ###
             self.elimWidget = QtWidgets.QWidget()
-            width5 = int(self.WIDTH * 0.1250)
-            self.elimWidget.setFixedWidth(width5)
+            self.elimWidget.setFixedWidth(pqi.px_w(240, self.WIDTH))
             self.elimLayout = QtWidgets.QVBoxLayout(self.elimWidget)
             self.elimLayout.setContentsMargins(cmargins)
             self.elimLayout.setSpacing(hspace10)
@@ -788,10 +790,10 @@ class MainWindow(QtGui.QMainWindow):
             self.elimView_btns = {}
             for key,label in zip(keys,labels):
                 r = QtWidgets.QHBoxLayout()
-                r.setSpacing(px_w(8, self.WIDTH))
+                r.setSpacing(pqi.px_w(8, self.WIDTH))
                 l = QtWidgets.QLabel(label)
                 l.setFont(font)
-                l.setFixedHeight(px_h(25,self.HEIGHT))
+                l.setFixedHeight(pqi.px_h(25,self.HEIGHT))
                 l.setContentsMargins(wspace5,0,wspace5,0)
                 l.setStyleSheet('QLabel'
                                 '{ background-color : rgba(255,255,255,120);'
@@ -799,10 +801,10 @@ class MainWindow(QtGui.QMainWindow):
                                 'border-width : 2px;'
                                 'border-radius : 5px }')
                 # show/hide button
-                btn = show_hide_event(parent=self)
+                btn = pqi.show_hide_event(parent=self)
                 # next/back buttons
-                bck = back_next_event(parent=self, name = key + ' back')
-                nxt = back_next_event(parent=self, name = key + ' next')
+                bck = pqi.back_next_event(parent=self, name = key + ' back')
+                nxt = pqi.back_next_event(parent=self, name = key + ' next')
                 bck.setEnabled(False)
                 nxt.setEnabled(False)
                 if key == 'elim_user':
@@ -817,14 +819,13 @@ class MainWindow(QtGui.QMainWindow):
             lay5.addSpacing(hspace5)
             self.elimLayout.addWidget(title5, stretch=0)
             self.elimLayout.addLayout(lay5, stretch=2)
-            line_5 = vline()
+            line_5 = pqi.vline()
             self.settingsLayout.addWidget(self.elimWidget)
             self.settingsLayout.addWidget(line_5)
             
             ### Data figure plotting ###
             self.figWidget = QtWidgets.QWidget()
-            width6 = int(self.WIDTH * 0.0905)
-            self.figWidget.setFixedWidth(width6)
+            self.figWidget.setFixedWidth(pqi.px_w(190, self.WIDTH))
             self.figLayout = QtWidgets.QVBoxLayout(self.figWidget)
             cmargins3 = QtCore.QMargins(int(cmargins.top()/2), cmargins.top(), 
                                         int(cmargins.top()/2), int(cmargins.top()*3))
@@ -838,9 +839,9 @@ class MainWindow(QtGui.QMainWindow):
             title6.setFixedHeight(titleHeight)
             title6.setFont(headerFont)
             # buttons to view additional plotting options
-            self.plotBtns_bck = back_next_btns(parent=self, name='plotBtns back')
+            self.plotBtns_bck = pqi.back_next_btns(parent=self, name='plotBtns back')
             self.plotBtns_bck.setIconSize(QtCore.QSize(0,0))
-            self.plotBtns_nxt = back_next_btns(parent=self, name='plotBtns next')
+            self.plotBtns_nxt = pqi.back_next_btns(parent=self, name='plotBtns next')
             figTitle_row.addWidget(self.plotBtns_bck, stretch=0, 
                                    alignment=QtCore.Qt.AlignCenter | QtCore.Qt.AlignLeft)
             figTitle_row.addWidget(title6, stretch=2, alignment=QtCore.Qt.AlignCenter)
@@ -851,7 +852,7 @@ class MainWindow(QtGui.QMainWindow):
                            ('P-waveforms', 'rgba(245,214,78,150)', ['recordPwaves']), 
                            ('P-wave spectrogram', 'rgba(154,50,205,100)', ['recordPwaves']), 
                            ('P-wave EMG', 'rgba(0,205,102,100)', ['recordPwaves', 'hasEMG']),
-                           ('Lsr P-wave stats', 'rgba(84,44,45,70)', ['recordPwaves', 'lsrTrigPwaves']), 
+                           ('Laser P-wave stats', 'rgba(84,44,45,70)', ['recordPwaves', 'lsrTrigPwaves']), 
                            ('P-wave transitions\n(time-normalized)', 'rgba(0,0,0,255)', ['recordPwaves']), 
                            ('P-wave DF/F', 'rgba(172,237,138,100)', ['recordPwaves', 'hasDFF']),
                            ('Sleep timecourse',  'rgba(196,52,24,100)', []), 
@@ -874,7 +875,7 @@ class MainWindow(QtGui.QMainWindow):
                     label = QtWidgets.QLabel(name)
                     label.setFont(font)
                     self.plotBtns_dict[name]['label'] = label
-                    btn = PlotButton(parent=self, name=name, color=color, reqs=reqs)
+                    btn = pqi.PlotButton(parent=self, name=name, color=color, reqs=reqs)
                     self.plotBtns_dict[name]['btn'] = btn
                     r = QtWidgets.QHBoxLayout()
                     r.setSpacing(wspace5)
@@ -888,7 +889,7 @@ class MainWindow(QtGui.QMainWindow):
             for widget in self.plotBtn_widgets[1:]:
                 widget.hide()
                 self.figLayout.addWidget(widget, stretch=2)
-            line_6 = vline()
+            line_6 = pqi.vline()
             self.settingsLayout.addWidget(self.figWidget)
             self.settingsLayout.addWidget(line_6)
             
@@ -919,7 +920,7 @@ class MainWindow(QtGui.QMainWindow):
             self.settingsLayout.setContentsMargins(cmargins.left(), 0, 
                                                    cmargins.right(), 0)
             self.settingsLayout.setSpacing(hspace10)
-            self.settingsWidget.setFixedHeight(int(self.HEIGHT*0.22))
+            self.settingsWidget.setFixedHeight(pqi.px_h(240, self.HEIGHT))
             
             self.centralLayout.addWidget(self.settingsWidget)
             self.setCentralWidget(self.centralWidget)
@@ -1067,7 +1068,7 @@ class MainWindow(QtGui.QMainWindow):
               
         # update half-width thresholding method, adjust spinbox settings
         j = self.maxHW_thresType.currentIndex()
-        e = [['none',False,'',5000,0,1],['raw',True,' ms',5000,0,100], ['perc',True,' %',100,1,1]][i]
+        e = [['none',False,'',5000,0,1],['raw',True,' ms',5000,0,100], ['perc',True,' %',100,1,1]][j]
         self.hw_thres_type, enabled2, suffix2, maxval2, decimals2, singlestep2 = e
         self.maxHW_val.setEnabled(enabled2)
         self.maxHW_val.lineEdit().setVisible(enabled2)
@@ -1262,7 +1263,7 @@ class MainWindow(QtGui.QMainWindow):
         # get dictionary of current settings
         ddict = self.dict_from_vars()
         if self.sender() == self.saveData_btn and ddict != self.plotSettings:
-            res = warning_dlg('Settings changed from current plot - continue?')
+            res = pqi.warning_dlg('Settings changed from current plot - continue?')
             if res == 0:
                 return
         tmp = np.array([list(ddict['thres_states'].keys()), 
@@ -1390,11 +1391,13 @@ class MainWindow(QtGui.QMainWindow):
         self.thidx_raw[self.thres_idx] = 1
         thdn = np.round(self.thres_idx / self.fbin).astype('int')
         self.thidx_dn[thdn] = 1
+        
         # calculate binned STD of processed LFP (excluding noise indices)
-        self.LFP_std_dn = downsample_sd(self.LFP_processed, length=self.M.shape[1],
-                                         nbin=self.fbin, noise_idx=self.noise_idx, replace_nan=0)
+        self.LFP_std_dn = downsample_sd(np.array(self.LFP_processed), 
+                                        length=self.M.shape[1], nbin=self.fbin, 
+                                        noise_idx=np.array(self.noise_idx), replace_nan=np.nan)
         # enable option to calculate noise-excluded SP if EEG noise indices are marked
-        calcAction = self.noiseCalcSP_btn.findChild(QtGui.QAction, 'calculate noise')
+        calcAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'calculate noise')
         calcAction.setEnabled(self.eeg_noise_idx.size > 0)
         
         
@@ -1490,14 +1493,15 @@ class MainWindow(QtGui.QMainWindow):
         # update noise indices for the current signal
         if sig == 'LFP':
             self.noise_idx = idx
-            self.LFP_std_dn = downsample_sd(self.LFP_processed, length=self.M.shape[1],
-                                             nbin=self.fbin, noise_idx=idx, replace_nan=0)
+            self.LFP_std_dn = downsample_sd(np.array(self.LFP_processed), 
+                                            length=self.M.shape[1], nbin=self.fbin, 
+                                            noise_idx=idx, replace_nan=np.nan)
         elif sig == 'EMG':
             self.emg_noise_idx = idx
         elif sig == 'EEG':
             self.eeg_noise_idx = idx
         # enable option to calculate noise-excluded SP if EEG noise indices are marked
-        calcAction = self.noiseCalcSP_btn.findChild(QtGui.QAction, 'calculate noise')
+        calcAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'calculate noise')
         calcAction.setEnabled(self.eeg_noise_idx.size > 0)
         print('Done with finding noise')
         
@@ -1696,6 +1700,7 @@ class MainWindow(QtGui.QMainWindow):
         labelStyle = {'color': '#FFF', 'font-size': '12pt'}
         yax.setLabel('Laser', units='', **labelStyle)
         yax.setTicks([[(0, ''), (1, '')]])
+        yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
         xax = self.graph_treck.getAxis(name='bottom')
         xax.setTicks([[]])
     
@@ -1707,10 +1712,12 @@ class MainWindow(QtGui.QMainWindow):
         # clear plot, load annotation vector
         self.graph_brainstate.clear()
         self.image_brainstate = pg.ImageItem() 
-        self.graph_brainstate.addItem(self.image_brainstate)       
+        self.graph_brainstate.addItem(self.image_brainstate)
         self.image_brainstate.setImage(self.M.T)
         # set time scale and color map
-        self.image_brainstate.scale(self.fdt*scale,1)
+        tr = QtGui.QTransform()
+        tr.scale(self.fdt*scale, 1)
+        self.image_brainstate.setTransform(tr)
         self.image_brainstate.setLookupTable(self.lut_brainstate)
         self.image_brainstate.setLevels([0, 7])
         
@@ -1723,9 +1730,10 @@ class MainWindow(QtGui.QMainWindow):
                   'yMax': 1}
         self.graph_brainstate.vb.setLimits(**limits)
         yax = self.graph_brainstate.getAxis(name='left')
-        labelStyle = {'color': '#FFF', 'font-size': '12pt'}
+        labelStyle = {'color': '#FFF', 'font-size': '10pt'}
         yax.setLabel('Brainstate', units='', **labelStyle)
         yax.setTicks([[(0, ''), (1, '')]])
+        yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
         xax = self.graph_brainstate.getAxis(name='bottom')
         xax.setTicks([[]])
     
@@ -1741,7 +1749,9 @@ class MainWindow(QtGui.QMainWindow):
         self.graph_spectrum.addItem(self.image_spectrum)
         self.image_spectrum.setImage(self.eeg_spec[0:self.ifreq[-1],:].T)
         # set time scale and color map
-        self.image_spectrum.scale(self.fdt*scale, 1.0*self.fdx)
+        tr = QtGui.QTransform()
+        tr.scale(self.fdt*scale, 1.0*self.fdx)
+        self.image_spectrum.setTransform(tr)
         self.image_spectrum.setLookupTable(self.lut_spectrum)
         # set axis params
         self.graph_spectrum.setXLink(self.graph_brainstate.vb)
@@ -1749,12 +1759,13 @@ class MainWindow(QtGui.QMainWindow):
         limits = {'xMin': -1*self.fdt*scale, 'xMax': self.ftime[-1]*scale, 
                   'yMin': 0, 'yMax': self.freq[self.ifreq[-1]]}
         self.graph_spectrum.vb.setLimits(**limits)
-        ax = self.graph_spectrum.getAxis(name='left')
-        labelStyle = {'color': '#FFF', 'font-size': '12pt'}
-        ax.setLabel('Freq', units='Hz', **labelStyle)
-        ax.setTicks([[(0, '0'), (10, '10'), (20, '20')]])
+        yax = self.graph_spectrum.getAxis(name='left')
+        labelStyle = {'color': '#FFF', 'font-size': '10pt'}
+        yax.setLabel('Freq', units='Hz', **labelStyle)
+        yax.setTicks([[(0, '0'), (10, '10'), (20, '20')]])
+        yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
         
-        # plot data vector(s) in FFT time
+        # plot data vector(sf) in FFT time
         self.graph_emgampl.clear()
         l = 'EMG Ampl.'; u = 'V'
         # plot EMG amplitude
@@ -1789,7 +1800,8 @@ class MainWindow(QtGui.QMainWindow):
         limits = {'xMin' : 0, 'xMax' : self.ftime[-1]*scale}
         self.graph_emgampl.vb.setLimits(**limits)
         yax = self.graph_emgampl.getAxis(name='left')
-        yax.setLabel(l, units=u, **labelStyle)    
+        yax.setLabel(l, units=u, **labelStyle)   
+        yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
         xax = self.graph_emgampl.getAxis(name='bottom')
         xax.setLabel('Time', units=scale_unit, **labelStyle)
     
@@ -1864,7 +1876,7 @@ class MainWindow(QtGui.QMainWindow):
             self.tseq = np.round(self.tseq, np.abs(int(np.floor(np.log10(self.dt)))))
             findPwaves = True
             findArtifacts = True
-        self.eeg_amp = np.median(np.abs(self.EEG))
+        self.eeg_amp = np.nanmedian(np.abs(self.EEG))
         
         # clear graph
         self.graph_eeg.clear()
@@ -1946,54 +1958,60 @@ class MainWindow(QtGui.QMainWindow):
                 for tns in self.tnoise_seqs:
                     a = pg.PlotDataItem(self.tseq[tns], self.EEG[self.ii][tns], 
                                         pen=pg.mkPen((255,20,147,200),width=2))
+                    a.setObjectName('current LFP noise')
                     self.graph_eeg.addItem(a)
             elif self.pointers['EMG'] != -1 and self.emg_noise_seqs[0].size > 0:
                 # EMG noise (lightblue)
                 for etns in self.emg_tnoise_seqs:
                     b = pg.PlotDataItem(self.tseq[etns], self.EEG[self.ii][etns], 
                                         pen=pg.mkPen((7,247,247,200),width=2))
+                    b.setObjectName('current EMG noise')
                     self.graph_eeg.addItem(b)
             elif self.pointers['EEG'] != -1 and self.eeg_noise_seqs[0].size > 0:
                 # EEG noise (gold)
                 for eetns in self.eeg_tnoise_seqs:
                     c = pg.PlotDataItem(self.tseq[eetns], self.EEG[self.ii][eetns], 
                                         pen=pg.mkPen((252,186,3,200),width=2))
+                    c.setObjectName('current EEG noise')
                     self.graph_eeg.addItem(c)
         
         # plot P-wave indices as dots (color-coded by brain state)
         if self.pplot_pidx and self.pi_seq.size > 0:
             self.pi_states = [int(self.M.flatten()[int(pi/self.fbin)]) for pi in self.pi_seq]
-            pwaves = pg.PlotDataItem(self.tseq[self.ti_seq], self.pi_amps, 
-                                     pen=None, symbol='o', symbolSize=15)
-            brushes = [pg.mkColor(self.lut_brainstate[s]) for s in self.pi_states]
-            pwaves.scatter.setBrush(brushes)
+            brushes = [self.lut_brainstate[s] for s in self.pi_states]
+            pwaves = pg.PlotDataItem(self.tseq[self.ti_seq], self.pi_amps, pen=None, 
+                                     symbol='o', symbolSize=15, symbolBrush=brushes)
+            pwaves.setObjectName('pwave markers')
             pwaves.sigPointsClicked.connect(self.select_point)
             self.graph_eeg.addItem(pwaves)
         
         # plot P-wave triggering laser pulses as triangles (color-coded by success)
         if self.pplot_laser and self.lsrTrigPwaves and self.iLsr_seq.size > 0 and self.pi.size > 0:
-            lsrpulses = pg.PlotDataItem(self.tseq[self.tiLsr_seq], 
-                                        [self.eeg_amp*6+100]*len(self.iLsr_seq), 
-                                        pen=None, symbol='t', symbolSize=10)
             brushes = []
             for l in self.iLsr_seq:
                 if l in self.noise_idx:
-                    brushes.append(pg.mkColor(220,220,220))  # lsr during noise = gray
+                    brushes.append((220,220,220))  # lsr during noise = gray
                 elif l in self.success_lsr:
-                    brushes.append(pg.mkColor(167,240,10))   # successful lsr = green
+                    brushes.append((167,240,10))   # successful lsr = green
                 else:
-                    brushes.append(pg.mkColor(242,157,169))  # failed lsr = red
-            lsrpulses.scatter.setBrush(brushes)
+                    brushes.append((242,157,169))  # failed lsr = red
+                    
+            lsrpulses = pg.PlotDataItem(self.tseq[self.tiLsr_seq], 
+                                        [self.eeg_amp*6+100]*len(self.iLsr_seq), 
+                                        pen=None, symbol='t', symbolSize=14,
+                                        symbolBrush=brushes)
+            lsrpulses.setObjectName('laser markers')
             lsrpulses.sigPointsClicked.connect(self.select_point)
             self.graph_eeg.addItem(lsrpulses)
 
         # plot user-eliminated waveforms as stars (color-coded by brain state)
         if self.pplot_elim_user and self.uepi_seq.size > 0:
             self.uepi_states = [int(self.M.flatten()[int(uepi/self.fbin)]) for uepi in self.uepi_seq]
+            brushes = [self.lut_brainstate[s] for s in self.uepi_states]
             user_elims = pg.PlotDataItem(self.tseq[self.ueti_seq], self.uepi_amps, 
-                                         pen=None, symbol='star', symbolSize=15)
-            brushes = [pg.mkColor(self.lut_brainstate[s]) for s in self.uepi_states]
-            user_elims.scatter.setBrush(brushes)
+                                         pen=None, symbol='star', symbolSize=15,
+                                         symbolBrush=brushes)
+            user_elims.setObjectName('user-eliminated waveform markers')
             user_elims.sigPointsClicked.connect(self.select_point)
             self.graph_eeg.addItem(user_elims)
         
@@ -2005,9 +2023,10 @@ class MainWindow(QtGui.QMainWindow):
                 if len(idx) > 0:
                     elim_amps = [self.EEG[epi[j]] - 50 - 75*i for i,j in enumerate(idx)]
                     # A = amplitude outlier; W = half-width outlier; D = duplicate; N = noise artifact
-                    symbols = np.array([pg_symbol(char) for char in ['A','W','D','N']])[idx]
+                    symbols = np.array([pqi.pg_symbol(char) for char in ['A','W','D','N']])[idx]
                     a = pg.PlotDataItem([self.tseq[eti]]*len(elim_amps), elim_amps, 
                                         pen=None, symbol=symbols, symbolSize=12)
+                    a.setObjectName('artifact markers')
                     a.setSymbolPen((255,255,0),width=2)
                     a.sigPointsClicked.connect(self.select_point)
                     self.graph_eeg.addItem(a)
@@ -2030,7 +2049,7 @@ class MainWindow(QtGui.QMainWindow):
             # current point was manually eliminated and user-deleted waveforms are currently visible on graph
             elif self.curIdx in self.uepi_seq and self.pplot_elim_user:
                 i = int(np.where(self.uepi_seq==self.curIdx)[0])
-                self.curPoint = user_elim.scatter.points()[i]
+                self.curPoint = user_elims.scatter.points()[i]
                 self.curItem = None
             # current point is a different artifact, which is currently visible on graph
             elif self.curIdx in self.epi_seq and any(self.pplot_artifacts):
@@ -2102,15 +2121,17 @@ class MainWindow(QtGui.QMainWindow):
             if ns_cand.size > 0:
                 a = pg.PlotDataItem(self.tseq[tns_cand], self.EEG[self.ii][tns_cand], 
                                     pen=pg.mkPen((255,255,0),width=2.5))
+                a.setObjectName('user-selected signal')
                 self.graph_eeg.addItem(a)
                 
         # set axis parameters
-        ax = self.graph_eeg.getAxis(name='left')
+        yax = self.graph_eeg.getAxis(name='left')
         labelStyle = {'color': '#FFF', 'font-size': '12pt'}
-        ax.setLabel(self.ylabel, units='V', **labelStyle)
-        ax = self.graph_eeg.getAxis(name='bottom')
+        yax.setLabel(self.ylabel, units='V', **labelStyle)
+        yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
+        xax = self.graph_eeg.getAxis(name='bottom')
         labelStyle = {'color': '#FFF', 'font-size': '12pt'}
-        ax.setLabel('Time', units='s', **labelStyle)
+        xax.setLabel('Time', units='s', **labelStyle)
         
         # save central index of current plot
         self.curPlotIndex = int(self.index)
@@ -2642,7 +2663,7 @@ class MainWindow(QtGui.QMainWindow):
                         # add sequence to EEG noise, don't change P-wave annotation
                         self.eeg_noise_idx = np.sort(np.unique(np.append(self.eeg_noise_idx, noiseSelectIdx)))
                         # enable option to calculate noise-excluded SP if EEG noise indices are marked
-                        calcAction = self.noiseCalcSP_btn.findChild(QtGui.QAction, 'calculate noise')
+                        calcAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'calculate noise')
                         calcAction.setEnabled(self.eeg_noise_idx.size > 0)
                 # annotate selected sequence as "clean"
                 elif event.key() == QtCore.Qt.Key_C:
@@ -2679,7 +2700,7 @@ class MainWindow(QtGui.QMainWindow):
                         # remove sequence from EEG noise, don't change P-wave annotation
                         self.eeg_noise_idx = np.sort(np.setdiff1d(self.eeg_noise_idx, noiseSelectIdx))
                         # enable option to calculate noise-excluded SP if EEG noise indices are marked
-                        calcAction = self.noiseCalcSP_btn.findChild(QtGui.QAction, 'calculate noise')
+                        calcAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'calculate noise')
                         calcAction.setEnabled(self.eeg_noise_idx.size > 0)
                 # reset all noise boundaries
                 self.noiseStartIdx = None
@@ -2742,19 +2763,19 @@ class MainWindow(QtGui.QMainWindow):
             
         # 2 - minutes scale
         elif event.key() == QtCore.Qt.Key_2:
-            self.tscale = 1/60.0 
+            self.tscale = 1/60.
             self.tunit = 'min'
-            self.plot_session(scale=1/60.0, scale_unit='min')
-            self.plot_brainstate(scale=1/60.0)
-            self.plot_treck(scale=1/60.0)
+            self.plot_session(scale=1/60., scale_unit='min')
+            self.plot_brainstate(scale=1/60.)
+            self.plot_treck(scale=1/60.)
 
         # 3 - hours scale
         elif event.key() == QtCore.Qt.Key_3:
-            self.tscale = 1/3600.0 
+            self.tscale = 1/3600.
             self.tunit = 'h'
-            self.plot_session(scale=1/3600.0, scale_unit='h')
-            self.plot_brainstate(scale=1/3600.0)
-            self.plot_treck(scale=1/3600.0)  
+            self.plot_session(scale=1/3600., scale_unit='h')
+            self.plot_brainstate(scale=1/3600.)
+            self.plot_treck(scale=1/3600.)  
         
         # s - save file
         elif event.key() == QtCore.Qt.Key_S:    
@@ -2891,7 +2912,7 @@ class MainWindow(QtGui.QMainWindow):
             self.pointers['EEG'] = 0
             self.ylabel = 'EEG 1'
         # median of Intan signal to scale the laser signal
-        self.eeg_amp = np.median(np.abs(self.EEG))
+        self.eeg_amp = np.nanmedian(np.abs(self.EEG))
         
         # load EEG spectrogram, set max color
         if not(os.path.isfile(os.path.join(self.ppath, self.name, 'sp_' + self.name + '.mat'))):
@@ -2906,7 +2927,7 @@ class MainWindow(QtGui.QMainWindow):
         self.color_max = np.max(self.eeg_spec)
         # enable option to load noise-excluded SP if file exists
         npath = os.path.join(self.ppath, self.name, f'sp_nannoise_{self.name}.mat')
-        loadAction = self.noiseCalcSP_btn.findChild(QtGui.QAction, 'load noise')
+        loadAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'load noise')
         loadAction.setEnabled(os.path.exists(npath))
         
         self.ftime = np.squeeze(spec['t'])        # vector of SP timepoints
@@ -3063,7 +3084,7 @@ class MainWindow(QtGui.QMainWindow):
         self.plot_session(scale=self.tscale, scale_unit=self.tunit)
         # enable option to load noise-excluded SP if file exists
         npath = os.path.join(self.ppath, self.name, f'sp_nannoise_{self.name}.mat')
-        loadAction = self.noiseCalcSP_btn.findChild(QtGui.QAction, 'load noise')
+        loadAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'load noise')
         loadAction.setEnabled(os.path.exists(npath))
         
     
@@ -3092,7 +3113,7 @@ class MainWindow(QtGui.QMainWindow):
         """
         Instantiate informational help window
         """
-        self.hw = HelpWindow()
+        self.hw = pqi.HelpWindow()
         self.hw.show()
         
     
@@ -3105,7 +3126,7 @@ class MainWindow(QtGui.QMainWindow):
     def debug(self):
         pdb.set_trace()
 
-# some input parameter management
+# get ppath and name from command line input
 params = sys.argv[1:]
 if (len(params) == 0) :
     ppath = ''
@@ -3131,10 +3152,18 @@ if platform.system() == 'Darwin':
 elif platform.system() == 'Linux':
     ppath ='/media/fearthekraken/Mandy_HardDrive1/nrem_transitions/'
     
-name = 'Salinger_073020n1'
+#name = 'Salinger_073020n1'
 
+ppath = '/home/fearthekraken/Documents/Data/sleepRec_processed/'
+name = 'Olaf_111720n1'
 
-app = QtGui.QApplication([])
+# if ppath == '' or name == '':
+#     ddir = QtWidgets.QFileDialog().getExistingDirectory(parent=None,
+#                                                         caption="Choose recording folder", 
+#                                                         directory = ppath)
+    
+    
+app = QtWidgets.QApplication([])
 app.setStyle('Fusion')
 w = MainWindow(ppath, name)
 w.show()

@@ -202,7 +202,6 @@ def load_dose_recordings(ppath, rec_file):
             ctr_list.append(a[1])
 
     return ctr_list, doses
-    
 
 
 def get_snr(ppath, name):
@@ -454,6 +453,18 @@ def video_pulse_detection(ppath, rec, SR=1000, iv = 0.01):
     idx = np.concatenate(([t[0]],t[t2+1]))
     return idx
 
+
+def set_awake(M, MSP, freq, mu=[10, 100]):
+    imu = np.where((freq>=mu[0]) & (freq<=mu[1]))[0]
+    df = freq[1]-freq[0]    
+    widx = np.where(M==2)[0]
+    ampl = np.sqrt(MSP[imu, :].sum(axis=0)*df)
+    wampl = ampl[widx]
+    thr = wampl.mean() + 1*wampl.std()
+    awk_idx = widx[np.where(wampl>thr)[0]]
+    #qwk_idx = np.setdiff1d(widx, awk_idx)
+    M[awk_idx] = 5
+    return M
 
 
 # SIGNAL PROCESSING ###########################################################
@@ -3672,31 +3683,6 @@ def laser_brainstate_bootstrap(ppath, recordings, pre, post, edge=0, sf=0, nboot
     box_off(ax)
     plt.draw()
 
-    # statistics
-    # OLD VERSION
-    # ibase = np.where((t>=-laser_dur) & (t<0))[0]
-    # ilsr  = np.where((t>=0) & (t<laser_dur))[0]
-    # P   = np.zeros((3,))
-    # Mod = np.zeros((3,))
-    # for istate in [1,2,3]:
-    #     basel = usProb[:,ibase,istate-1].mean(axis=1)
-    #     laser = usProb[:,ilsr, istate-1].mean(axis=1)
-    #     d = laser - basel
-    #     if np.mean(d) >= 0:
-    #         # now we want all values be larger than 0
-    #         p = len(np.where(d>0)[0]) / (1.0*nboots)
-    #         sig = 1 - p
-    #         if sig == 0:
-    #             sig = 1.0/nboots
-    #         Mod[istate-1] = (np.mean(laser) / np.mean(basel) - 1) * 100
-    #     else:
-    #         p = len(np.where(d<0)[0]) / (1.0*nboots)
-    #         sig = 1 - p
-    #         if sig == 0:
-    #             sig = 1.0/nboots
-    #         Mod[istate-1] = -(1 - np.mean(laser) / np.mean(basel)) * 100
-    #     P[istate-1] = sig
-
     # NEW VERSION
     ibase = np.where((t>=-laser_dur) & (t<0))[0]
     ilsr  = np.where((t>=0) & (t<laser_dur))[0]
@@ -6197,14 +6183,6 @@ def sleep_spectrum_simple(ppath, recordings, istate=1, tstart=0, tend=-1, fmax=-
                     pass
         return SP
     
-    # def _interpolate_harmonics(SP, freq, f_max, harmcs, iplt_level):
-    #     df = freq[2]-freq[1]
-    #     for h in np.arange(harmcs, f_max, harmcs):
-    #         i = np.argmin(np.abs(freq - h))
-    #         if np.abs(freq[i] - h) < df and h != 60: 
-    #             SP[i,:] = (SP[i-iplt_level:i,:] + SP[i+1:i+1+iplt_level,:]).mean(axis=0) * 0.5
-    #     return SP
-    
     mice = []
     for rec in recordings:
         idf = re.split('_', rec)[0]
@@ -6229,7 +6207,8 @@ def sleep_spectrum_simple(ppath, recordings, istate=1, tstart=0, tend=-1, fmax=-
         # load brain state
         idf = re.split('_', rec)[0]
         M = load_stateidx(ppath, rec)[0]
-        M = AS.adjust_brainstate(M, dt, ma_thr=ma_thr, ma_state=ma_state, flatten_is=flatten_is, noise_state=noise_state)
+        M = AS.adjust_brainstate(M, dt, ma_thr=ma_thr, ma_state=ma_state, 
+                                 flatten_is=flatten_is, noise_state=noise_state)
 
         # determine start and end of time frame used for calculation
         istart = int(np.round(tstart / dt))

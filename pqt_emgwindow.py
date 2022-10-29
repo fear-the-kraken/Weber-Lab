@@ -24,7 +24,7 @@ import sleepy
 import AS
 import pwaves
 import pdb
-from gui_items import warning_dlg
+from pqt_items import warning_dlg
 
 class EMGTwitchFigure(QtWidgets.QDialog):
     def __init__(self, parent=None):

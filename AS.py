@@ -5,27 +5,21 @@ Created on Sun Oct 25 15:21:14 2020
 
 @author: fearthekraken
 """
-import sys
+import os
 import re
-import os.path
-import numpy as np
-import pandas as pd
-import copy
-from itertools import chain
-from functools import reduce
-import pickle
-import matplotlib
-import matplotlib.patches as patches
-import matplotlib.pyplot as plt
-import seaborn as sns
 import scipy
 import scipy.io as so
-import scipy.stats as stats
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib
+import matplotlib.pyplot as plt
+from functools import reduce
 import math
-from statsmodels.stats.multicomp import MultiComparison
 from statsmodels.stats.anova import AnovaRM
+from statsmodels.stats.multicomp import MultiComparison
 import pdb
-import pyphi
+# custom modules
 import sleepy
 import pwaves
 
@@ -165,10 +159,7 @@ def smooth_data(x, sig):
     sm_data - smoothed data
     
     filter = [f1, f2, f3, f4, f5]
-    
     res = [ ... ... ... (i-2)*f1 + (i-1)*f2 + (i)*f3 + (i+1)*f4 + (i+2)*f5 ... ... ... ]
-    
-    
     """
     
     sig = float(sig)
@@ -192,7 +183,6 @@ def smooth_data(x, sig):
         
         return pdf
         
-    
     bound = 1.0/10000   # 0.0001
     # random variable $L has a normal distribution with standard deviation $sig
     L = 10.
@@ -211,41 +201,8 @@ def smooth_data(x, sig):
     
     # perform Gaussian smoothing on $x vector
     res = scipy.ndimage.convolve1d(np.array(x), np.array(F))
-    
     return res
     
-    # convolve data vector with filter
-    #sm_data = scipy.signal.convolve2d(np.array((x,)), np.array((F,)), 'same', 'symm')
-    
-    #return sm_data
-    
-    #x2d = np.array((x,))
-    #mask=np.where(np.isnan(x2d),1,0)
-    
-    #a = scipy.signal.convolve2d(np.array((x,)), np.array((F,)), 'same', 'symm')
-    
-    
-    
-    #inan_seq = sleepy.get_sequences(np.nonzero(np.isnan(res))[0])
-        
-    
-    #mask = np.where(np.isnan(x), 1, 0)  # mask for $x (0's = numbers, 1's = NaNs)
-    
-    # min. numerical values needed under filter to calculate numerical output (instead of NaN)
-    # min_valid = (1-max_missing)*len(F)
-    # hF = int((len(F)-1)/2)
-    # # copy of original $x with zeros instead of NaNs
-    # inan = np.nonzero(np.isnan(x))[0]
-    # x2 = np.array(x)
-    # x2[inan] = 0
-    
-    # for i in inan:
-    #     # indices in $x surrounding the NaN at index i
-    #     ifilt = range(max(0, i-hF), min(len(x), i+hF+1))
-    
-    # miss_idx = zip(*np.where(mask==1))
-    
-
 def smooth_data2(x, nstep):
     """
     Smooth data by replacing each of $nstep consecutive bins with their mean
@@ -256,8 +213,9 @@ def smooth_data2(x, nstep):
     x2 - smoothed data
     """
     x2 = [[np.mean(x[i:i+nstep])]*nstep for i in np.arange(0, len(x), nstep)]
-    x2 = list(chain.from_iterable(x2))
-    x2 = np.array((x2))
+    #x2 = list(chain.from_iterable(x2))
+    #x2 = np.array((x2))
+    x2 = np.concatenate(x2)
     x2 = x2[0:len(x)]
     
     return x2
@@ -309,6 +267,97 @@ def convolve_data(x, psmooth, axis=2):
         raise KeyError('ERROR: inputted data must be a 1 or 2-dimensional array')
     
     return xsmooth
+
+def fit_dff(a465, a405, sr, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=False):
+    """
+    Calculate optimal linear fit of isobestic signal to calcium signal. Output
+    is DF/F signal; difference in fluorescence from baseline divided by baseline
+    @Params
+    a465 - calcium signal
+    a405 - isobestic signal
+    sr - sampling rate (Hz)
+    nskip - ignore the first $nskip seconds when fitting signals
+    wcut - lowpass filter (Hz) for calcium signal
+    wcut405 - lowpass filter (Hz) for isobestic signal
+    perc - if > 0, fit using only lower Xth percentile of DF/F signal
+    shift_only - if True, only shift (do not scale) 405 signal to fit 465 signal
+    @Returns
+    dff - fitted DF/F signal
+    """
+    # low-pass filter 405 and 465 signals
+    if wcut405 == 0 or perc > 0:
+        wcut405 = wcut
+    w0 = wcut    / (0.5*sr)
+    w1 = wcut405 / (0.5*sr)
+    if w0>0:
+        a465 = sleepy.my_lpfilter(a465, w0, N=4)
+        a405 = sleepy.my_lpfilter(a405, w1, N=4)
+    nstart = int(np.round(nskip*sr))  # discard initial $nskip seconds
+    # shift and/or scale 405 signal
+    if shift_only and perc == 0:
+        X = np.vstack([np.ones(len(a405))]).T
+    else:
+        X = np.vstack([a405, np.ones(len(a405))]).T
+    
+    # least squares regression to fit 405 signal to 465 signal
+    p = np.linalg.lstsq(X[nstart:,:], a465[nstart:], rcond=-1)[0]
+    a465_fit = np.dot(X, p)
+    # calculate DF/F (difference from baseline divided by the baseline)
+    dff = np.divide((a465 - a465_fit), a465_fit)
+    
+    if perc > 0:
+        # calculate lowest Xth percentile of DF/F signal
+        pc = np.percentile(dff[nstart:], perc)
+        idx = np.where(dff<pc)[0]
+        idx = idx[np.where(idx>nstart)[0]]
+        # fit baseline for points where calcium signal < Xth percentile of DF/F
+        X2 = np.vstack([a405[idx], np.ones(len(idx))]).T
+        p = np.linalg.lstsq(X2, a465[idx])[0]
+        a465_fit = a405*p[0] + p[1]
+        dff = np.divide((a465 - a465_fit), a465_fit)
+        
+    return dff
+
+def calculate_dff(ppath, name, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=False):
+    """
+    Calculate DF/F signal for fiber photometry recording and save as DFF.mat
+    @Params
+    ppath - base folder
+    name - recording folder
+    nskip - ignore the first $nskip seconds when fitting DF/F signal
+    wcut - lowpass filter for calcium (465 nm) signal
+    wcut405 - lowpass filter for isobestic (405 nm) signal
+    perc - if > 0, use only the lower Xth percentile of DF/F signal; avoids 
+           largely negative values
+    shift_only - if True, only shift (do not scale) 405 signal to fit 465 signal
+    @Returns
+    None
+    """
+    # load sampling rate
+    sr = sleepy.get_snr(ppath, name)
+    dt = 1.0/sr
+    # load 405 (isobestic) and 465 (calcium) signals
+    D = so.loadmat(os.path.join(ppath, name, 'DFF.mat'), squeeze_me=True)
+    a465 = D['465']
+    a405 = D['405']
+    n = len(a465)
+    
+    # calculate fitted DF/F signal
+    dff = fit_dff(a65, a405, sr=sr, nskip=nskip, wcut=wcut, wcut405=wcut405,
+                  perc=perc, shift_only=shift_only)
+
+    # downsample DF/F signal to 2.5 s bins
+    nbins = int(np.round(SR)*2.5)
+    k = int(np.ceil((1.0 * n) / nbins))
+    dff2 = np.zeros((k*nbins,))
+    dff2[:len(dff)]=dff
+    dff = dff2
+    dffd = downsample_vec(dff, nbins)
+    t = np.linspace(0.0, n*dt, n+1)
+    
+    # save signals in .mat file
+    so.savemat(os.path.join(ppath, name, 'DFF.mat'), {'t':t, '405':a405, '465':a465, 
+                                                      'dff':dff, 'dffd':dffd})
 
 def load_recordings(ppath, trace_file, dose, pwave_channel=False):
     """
@@ -470,21 +519,6 @@ def load_surround_files(ppath, pload, istate, plaser, null, signal_type=''):
         except:
             print('\nUnable to load .mat files - calculating new spectrograms ...\n')
             return []
-
-# def get_emg_amp(mSP, mfreq, r_mu = [10,500]):
-#     """
-#     Calculate EMG amplitude from input EMG spectrogram
-#     @Params
-#     mSP - EMG spectrogram
-#     mfreq - list of frequencies, corresponding to $mSP rows
-#     r_mu - [min,max] frequencies summed to get EMG amplitude
-#     @Returns
-#     p_mu - EMG amplitude vector
-#     """
-#     i_mu = np.where((mfreq >= r_mu[0]) & (mfreq <= r_mu[1]))[0]
-#     p_mu = np.sqrt(mSP[i_mu, :].sum(axis=0) * (mfreq[1] - mfreq[0]))
-#     return p_mu
-
 
 def emg_amplitude(ppath, rec, emg_source='raw', recalc_amp=False, nsr_seg=2, 
                   perc_overlap=0.75, recalc_highres=False, r_mu=[10,500], 
@@ -743,97 +777,6 @@ def highres_spectrogram(ppath, rec, nsr_seg=2, perc_overlap=0.95, recalc_highres
                              'perc_overlap' : perc_overlap})
     return SP, freq, t, nbin, dt
 
-# def highres_spectrogram(ppath, rec, nsr_seg=2, perc_overlap=0.95, recalc_highres=False, 
-#                         mode='EEG', get_M=False):
-#     """
-#     Load or calculate high-resolution spectrogram for a recording
-#     @Params
-#     ppath - base folder
-#     rec - name of recording    
-#     nsr_seg, perc_overlap - set FFT bin size (s) and overlap (%) for spectrogram calculation
-#     recalc_highres - if True, recalculate high-resolution spectrogram from EEG, 
-#                               using $nsr_seg and $perc_overlap params
-#                      if False, load existing spectrogram from saved file
-#     mode - specifies EEG channel for calculating spectrogram
-#            'EEG' - return hippocampal spectrogram
-#            'EEG2' - return prefrontal spectrogram
-#            'EMG' - return EMG spectrogram
-#     get_M - if True, load high-res brain state annotation from saved file
-#     @Returns
-#     SP - loaded or calculated high-res spectrogram
-#     freq - list of spectrogram frequencies, corresponding to SP rows
-#     t - list of spectrogram time bins, corresponding to SP columns
-#     dt - no. seconds per SP time bin
-#     M_dt - brain state annotation upsampled to match SP time resolution
-#     """
-#     import time
-#     if mode == 'EEG':
-#         sp_file = 'SP'
-#     elif mode == 'EEG2':
-#         sp_file = 'SP2'
-#     elif mode == 'EMG':
-#         sp_file = 'mSP'
-#     M_dt = np.nan
-    
-#     # load high-resolution spectrogram if it exists
-#     if not recalc_highres:
-#         if os.path.exists(os.path.join(ppath, rec, '%s_highres_%s.mat' % (sp_file.lower(), rec))):
-#             try:
-#                 SPEC = so.loadmat(os.path.join(ppath, rec, '%s_highres_%s.mat' % (sp_file.lower(), rec)))
-#                 SP = SPEC[sp_file]
-#                 freq = SPEC['freq'][0]
-#                 t = SPEC['t'][0]
-#                 dt = SPEC['dt'][0][0]  # number of seconds in each SP bin
-#                 nbin = SPEC['nbin'][0][0]  # number of EEG/EMG samples in each SP bin
-#             except:
-#                 recalc_highres = True
-            
-#             if get_M:
-#                 # load high-resolution brain state annotation if it exists, calculate if not
-#                 if os.path.exists(os.path.join(ppath, rec, 'remidx_highres_%s.mat' % rec)):
-#                     M_dt = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'remidx_highres_%s.mat' % rec))['M'])
-#                 else:
-#                     M, _ = sleepy.load_stateidx(ppath, rec)
-#                     if len(M) == SP.shape[1]:
-#                         M_dt = M
-#                     elif len(M) < SP.shape[1]:
-#                         M_dt = time_morph(M, SP.shape[1])
-#                         so.savemat(os.path.join(ppath, rec, 'remidx_highres_%s.mat' % rec), {'M' : M_dt, 'S' : {}})
-#         else:
-#             recalc_highres = True
-        
-#     if recalc_highres:
-#         print('Calculating high-resolution %s spectrogram for %s ...' % (mode, rec))
-        
-#         # load sampling rate, s per time bin, and raw EEG/EMG
-#         sr = sleepy.get_snr(ppath, rec)
-#         dt = nsr_seg*(1-perc_overlap)
-#         if mode == 'EEG':
-#             data = so.loadmat(os.path.join(ppath, rec, 'EEG.mat'), squeeze_me=True)['EEG']
-#         elif mode == 'EEG2':
-#             data = so.loadmat(os.path.join(ppath, rec, 'EEG2.mat'), squeeze_me=True)['EEG2']
-#         elif mode == 'EMG':
-#             data = so.loadmat(os.path.join(ppath, rec, 'EMG.mat'), squeeze_me=True)['EMG']
-        
-#         # calculate and save high-res spectrogram
-#         freq, t, SP = scipy.signal.spectrogram(data, fs=sr, window='hanning', nperseg=int(nsr_seg * sr), 
-#                                                      noverlap=int(nsr_seg * sr * perc_overlap))
-#         nbin = len(data) / SP.shape[1]
-#         so.savemat(os.path.join(ppath, rec, '%s_highres_%s.mat' % (sp_file.lower(), rec)), {sp_file:SP, 'freq':freq, 't':t, 'dt':dt, 'nbin':nbin})
-#         time.sleep(1)
-        
-#         if get_M:
-#             # upsample brainstate annotation in SP-resolution bins
-#             M, _ = sleepy.load_stateidx(ppath, rec)
-#             if len(M) == SP.shape[1]:
-#                 M_dt = M
-#             elif len(M) < SP.shape[1]:
-#                 M_dt = time_morph(M, SP.shape[1])
-#             elif len(M) > SP.shape[1]:
-#                 M_dt = np.zeros((SP.shape[1], )) # no valid way to downsample M yet
-#             so.savemat(os.path.join(ppath, rec, 'remidx_highres_%s.mat' % rec), {'M' : M_dt, 'S' : {}})
-#     return SP, freq, t, dt, nbin, M_dt
-
 def adjust_brainstate(M, dt, ma_thr=20, ma_state=3, flatten_is=False, keep_MA=[1,4,5], noise_state=2):
     """
     Handle microarousals and transition states in brainstate annotation
@@ -1066,7 +1009,7 @@ def dff_activity(ppath, recordings, istate, tstart=10, tend=-1, pzscore=False,
         
         # calculate DF/F signal using high cutoff frequency for 465 signal
         # and very low cutoff frequency for 405 signal
-        pyphi.calculate_dff(ppath, rec, wcut=10, wcut405=2, shift_only=False)
+        calculate_dff(ppath, rec, wcut=10, wcut405=2, shift_only=False)
         
         # load DF/F calcium signal
         dff = so.loadmat(os.path.join(ppath, rec, 'DFF.mat'), squeeze_me=True)['dffd'][istart:iend]
@@ -1112,7 +1055,7 @@ def dff_activity(ppath, recordings, istate, tstart=10, tend=-1, pzscore=False,
     
     # stats
     res_anova = AnovaRM(data=df, depvar='DFF', subject='Mouse', within=['State']).fit()
-    mc = MultiComparison(df['DFF'], df['State']).allpairtest(stats.ttest_rel, method='bonf')
+    mc = MultiComparison(df['DFF'], df['State']).allpairtest(scipy.stats.ttest_rel, method='bonf')
     print(res_anova)
     print('p = ' + str(float(res_anova.anova_table['Pr > F'])))
     print(''); print(mc[0])
@@ -1274,8 +1217,9 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
             plt.xlim([-pre+edge, post-edge])
             if len(ylim) == 2:
                 plt.ylim(ylim)
-            ax.add_patch(patches.Rectangle((0,0), laser_dur, 100, facecolor=[0.6, 0.6, 1], 
-                                           edgecolor=[0.6, 0.6, 1]))
+            ax.add_patch(matplotlib.patches.Rectangle((0,0), laser_dur, 100, 
+                                                      facecolor=[0.6, 0.6, 1], 
+                                                      edgecolor=[0.6, 0.6, 1]))
             sleepy.box_off(ax)
             plt.xlabel('Time (s)')
             plt.ylabel('Brain state (%)')
@@ -1290,8 +1234,10 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
                 for i in range(nmice):
                     plt.plot(t[it], BS[i,it,state]*100, color=clrs[i], label=mouse_order[i])
                 # plot laser interval
-                ax.add_patch(patches.Rectangle((0, 0), laser_dur, 100, facecolor=[0.6, 0.6, 1], 
-                                               edgecolor=[0.6, 0.6, 1], alpha=0.8))
+                ax.add_patch(matplotlib.patches.Rectangle((0, 0), laser_dur, 100, 
+                                                          facecolor=[0.6, 0.6, 1], 
+                                                          edgecolor=[0.6, 0.6, 1], 
+                                                          alpha=0.8))
                 # set axis limits and labels
                 plt.xlim((t[it][0], t[it][-1]))
                 if len(ylim) == 2:
@@ -1958,8 +1904,9 @@ def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1
     fyerr = np.nanstd(transitions_mx[:,:,1], axis=0) / np.sqrt(len(mice))
     ax1.plot(t, fdata, color='red', lw=3, label='IS-W')
     ax1.fill_between(t, fdata-fyerr, fdata+fyerr, color='red', alpha=0.3)
-    ax1.add_patch(patches.Rectangle((0,0), laser_dur, ax1.get_ylim()[1], facecolor=[0.6, 0.6, 1], 
-                                    edgecolor=[0.6, 0.6, 1], zorder=0))
+    ax1.add_patch(matplotlib.patches.Rectangle((0,0), laser_dur, ax1.get_ylim()[1], 
+                                               facecolor=[0.6, 0.6, 1], 
+                                               edgecolor=[0.6, 0.6, 1], zorder=0))
     sleepy.box_off(ax1)
     ax1.set_xlabel('Time (s)')
     ax1.set_ylabel('% time spent')
@@ -1978,7 +1925,7 @@ def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1
                 
     # stats - transition probability during pre-laser vs laser vs post-laser intervals
     res_anova = AnovaRM(data=df, depvar='Perc', subject='Mouse', within=['Cond']).fit()
-    mc = MultiComparison(df['Perc'], df['Cond']).allpairtest(stats.ttest_rel, method='bonf')
+    mc = MultiComparison(df['Perc'], df['Cond']).allpairtest(scipy.stats.ttest_rel, method='bonf')
     print(res_anova)
     print('p = ' + str(float(res_anova.anova_table['Pr > F'])))
     print(''); print(mc[0])
@@ -2169,7 +2116,7 @@ def state_online_analysis(ppath, recordings, istate=1, plotMode='0', single_mode
         plt.show()
     if print_stats:
         # stats
-        p = stats.ttest_rel(dataframe.dur[l0], dataframe.dur[l1], nan_policy='omit')
+        p = scipy.stats.ttest_rel(dataframe.dur[l0], dataframe.dur[l1], nan_policy='omit')
         sig='yes' if p.pvalue < 0.05 else 'no'
         print('')
         print(f'REM duration lsr off vs on  -- T={round(p.statistic,3)}, p-value={round(p.pvalue,5)}, sig={sig}')
@@ -2776,7 +2723,7 @@ def compare_online_analysis(ppath, ctr_rec, exp_rec, istate, stat, overlap=0,
         edata, elabels = pwaves.mx1d(edict, mouse_avg)
         
         # stats - unpaired t-test comparing control & experimental mice
-        p = stats.ttest_ind(np.array((cdata)), np.array((edata)), nan_policy='omit')
+        p = scipy.stats.ttest_ind(np.array((cdata)), np.array((edata)), nan_policy='omit')
         sig='yes' if p.pvalue < 0.05 else 'no'
         dof = len(cmice) + len(emice)
         print('')

@@ -137,17 +137,17 @@ def back_next_btns(parent, name):
     """
     # determine button size
     wpx, hpx = pyautogui.size()
-    bsize = int(round(wpx * 0.01042))
-    isize = int(round(wpx * 0.00885))
+    bsize = px_w(20, wpx)
+    isize = px_w(17, wpx)
     # set button properties
     btn = QtWidgets.QPushButton()
     btn.setObjectName(name)
-    btn.setFixedSize(bsize,bsize)  # 20,20
+    btn.setFixedSize(bsize,bsize)
     if 'back' in name:
         btn.setIcon(parent.style().standardIcon(QtWidgets.QStyle.SP_ArrowBack))
     elif 'next' in name:
         btn.setIcon(parent.style().standardIcon(QtWidgets.QStyle.SP_ArrowForward))
-    btn.setIconSize(QtCore.QSize(isize,isize))  # 17,17
+    btn.setIconSize(QtCore.QSize(isize,isize))
     btn.setStyleSheet('QPushButton {border : none; margin-top : 2px}')
     return btn
 
@@ -163,17 +163,17 @@ def back_next_event(parent, name):
     """
     # determine button size
     wpx, hpx = pyautogui.size()
-    bw, bh = [int(round(wpx * 0.01302)), int(round(hpx * 0.01389))]
-    iw, ih = [int(round(wpx * 0.01146)), int(round(hpx * 0.01296))]
+    bw, bh = [px_w(25, wpx), px_h(15, hpx)]
+    iw, ih = [px_w(22, wpx), px_h(13, hpx)]
     # set button properties
     btn = QtWidgets.QPushButton()
     btn.setObjectName(name)
-    btn.setFixedSize(bw,bh)  # 25,15
+    btn.setFixedSize(bw,bh)
     if 'back' in name:
         btn.setIcon(parent.style().standardIcon(QtWidgets.QStyle.SP_MediaSeekBackward))
     elif 'next' in name:
         btn.setIcon(parent.style().standardIcon(QtWidgets.QStyle.SP_MediaSeekForward))
-    btn.setIconSize(QtCore.QSize(iw,ih))  # 22,13
+    btn.setIconSize(QtCore.QSize(iw,ih))
     return btn
     
 
@@ -187,23 +187,23 @@ def show_hide_event(parent):
     """
     # determine button size
     wpx, hpx = pyautogui.size()
-    bsize = int(round(wpx * 0.01302))
-    radius = int(round(wpx * 0.00260))
+    bsize = px_w(25, wpx)
+    radius = px_w(5, wpx)
     # set button properties
     btn = QtWidgets.QPushButton()
     btn.setCheckable(True)
     btn.setChecked(False)
-    btn.setFixedSize(bsize,bsize)  # 25,25
+    btn.setFixedSize(bsize,bsize)
     btn.setStyleSheet('QPushButton'
                       '{ border : 2px solid gray;'
                       'border-style : outset;'
                       f'border-radius : {radius}px;'
                       'padding : 1px;'
                       'background-color : lightgray;'
-                      'image : url("hide_icon.png") }'
+                      'image : url("icons/hide_icon.png") }'
                       'QPushButton:checked'
                       '{ background-color : white;'
-                      'image : url("show_icon.png") }')
+                      'image : url("icons/show_icon.png") }')
     return btn
     
 
@@ -221,12 +221,12 @@ def update_noise_btn(top_parent, parent, icon):
     """
     # determine button size
     wpx, hpx = pyautogui.size()
-    bsize = int(round(wpx * 0.01458))
-    isize = int(round(wpx * 0.00938))
+    bsize = px_w(28, wpx)
+    isize = px_w(18, wpx)
     # set button properties
     btn = QtWidgets.QPushButton(parent)
     btn.setCheckable(True)
-    btn.setFixedSize(bsize,bsize)  # 28,28
+    btn.setFixedSize(bsize,bsize)
     if icon == 'save':
         btn.setIcon(top_parent.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton))
     elif icon == 'reset':
@@ -251,16 +251,16 @@ class PlotButton(QtWidgets.QPushButton):
         
         # determine button size
         wpx, hpx = pyautogui.size()
-        bsize = int(round(wpx * 0.01042))
+        bsize = px_w(20, wpx)
         self.radius = int(bsize/2)
         self.bwidth = int(bsize/5)
-        self.setFixedSize(bsize,bsize)  # 20,20
+        self.setFixedSize(bsize,bsize)
         # set button style
         self.setStyleSheet('QPushButton'
                            '{ border-color : gray;'
-                           'border-width : ' + str(self.bwidth) + 'px;'   # 4
+                           'border-width : ' + str(self.bwidth) + 'px;'
                            'border-style : outset;'
-                           'border-radius : ' + str(self.radius) + 'px;'  # 10
+                           'border-radius : ' + str(self.radius) + 'px;'
                            'padding : 1px;'
                            'background-color : ' + self.color + ' }'
                            'QPushButton:pressed'
@@ -360,7 +360,9 @@ class ArrowButton(pg.ArrowItem):
         super().__init__(*args, **kwargs)
         self.mainWin = parent
         # set arrow style
-        opts = {'angle': -90, 'headLen':17, 'tipAngle':45, 'tailLen':17, 'tailWidth':6, 
+        wpx, hpx = pyautogui.size()
+        hl, tl, tw = [px_w(n, wpx) for n in [17,17,6]]
+        opts = {'angle': -90, 'headLen':hl, 'tipAngle':45, 'tailLen':tl, 'tailWidth':tw, 
                 'pen':pg.mkPen((255,255,255),width=2), 'brush':pg.mkBrush((0,0,0))}
         self.setStyle(**opts)
         
@@ -397,10 +399,10 @@ class HelpWindow(QtWidgets.QDialog):
     """
     def __init__(self, parent=None):
         super(HelpWindow, self).__init__(parent)
-        self.WIDTH, self.HEIGHT = pyautogui.size()
+        wpx, hpx = pyautogui.size()
         
         # set contents margins, central layout
-        cm = px_w(25, self.WIDTH)
+        cm = px_w(25, wpx)
         self.setContentsMargins(cm,cm,cm,cm)
         self.centralLayout = QtWidgets.QVBoxLayout(self)
         
@@ -416,15 +418,15 @@ class HelpWindow(QtWidgets.QDialog):
         font = QtGui.QFont()
         font.setPointSize(12)
         # get set of widths and heights, standardized by monitor dimensions
-        wspace5, wspace10, wspace15, wspace20 = [px_w(w, self.WIDTH) for w in [5,10,15,20]]
-        hspace5, hspace10, hspace15, hspace20 = [px_h(h, self.HEIGHT) for h in [5,10,15,20]]
+        wspace5, wspace10, wspace15, wspace20 = [px_w(w, wpx) for w in [5,10,15,20]]
+        hspace5, hspace10, hspace15, hspace20 = [px_h(h, hpx) for h in [5,10,15,20]]
         
         # create title widget
         self.title = QtWidgets.QPushButton()
-        bh = px_h(40, self.HEIGHT)
+        bh = px_h(40, hpx)
         self.title.setFixedHeight(bh)
         rad = int(bh/4)
-        bw = px_h(3, self.HEIGHT)
+        bw = px_h(3, hpx)
         # create gradient color for title button
         dkR, dkG, dkB = (85,233,255)
         mdR, mdG, mdB = (142,246,255)
@@ -535,7 +537,7 @@ class HelpWindow(QtWidgets.QDialog):
                      '\u2192' : 'scroll to the right',
                      '\u2193' : 'brighten EEG spectrogram',
                      '\u2191' : 'darken EEG spectrogram'}
-        bsize, radius, bwidth = [px_w(w, self.WIDTH) for w in [30,8,3]]
+        bsize, radius, bwidth = [px_w(w, wpx) for w in [30,8,3]]
         bfont = QtGui.QFont()
         bfont.setPointSize(15)
         bfont.setBold(True)
@@ -577,12 +579,12 @@ class HelpWindow(QtWidgets.QDialog):
         self.keygrid.addLayout(keyLayout1, 0, 0, 3, 1)
         self.keygrid.addWidget(vline(), 0, 1, 3, 1)
         self.keygrid.addLayout(keyLayout2, 0, 2, 1, 1)
-        self.keygrid.addWidget(hline(), 1, 2, 1, 1)
+        self.keygrid.addWidget(vline(orientation='h'), 1, 2, 1, 1)
         self.keygrid.addLayout(keyLayout3, 2, 2, 1, 1)
         self.keygrid.addWidget(vline(), 0, 3, 3, 1)
         self.keygrid.addLayout(keyLayout4, 0, 4, 3, 1)
-        self.keygrid.setHorizontalSpacing(px_w(50,self.WIDTH))
-        self.keygrid.setVerticalSpacing(px_h(30,self.HEIGHT))
+        self.keygrid.setHorizontalSpacing(px_w(50, wpx))
+        self.keygrid.setVerticalSpacing(px_h(30, hpx))
         self.centralLayout.addWidget(self.title)
         self.centralLayout.addWidget(self.keywidget)
         self.centralLayout.setSpacing(hspace20)
