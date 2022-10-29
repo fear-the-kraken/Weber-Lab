@@ -22,8 +22,8 @@ import pdb
 import sleepy
 import pwaves
 import AS
-from gui_items import *
-from gui_windows import FigureWindow
+from pqt_items import *
+from pqt_windows import FigureWindow
 from detect_emg_twitches import EMGTwitchWindow
 
 
