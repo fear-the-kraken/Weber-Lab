@@ -15,6 +15,7 @@ import pyautogui
 import scipy.io as so
 import numpy as np
 import pandas as pd
+import matplotlib
 from PyQt5 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 import pdb
@@ -264,7 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.reset_noise = False      # reset noise or add newly detected indices to current noise?
         self.hasEMG = False           # recording contains EMG signal?
         self.hasDFF = False           # recording contains photometry signal?
-        self.recordPwaves = False     # recording contains detected P-waves?
+        self.hasPwaves = False        # recording contains detected P-waves?
         self.lsrTrigPwaves = False    # recording contains laser-triggered P-waves?
         self.optoMode = ''            # recording contains optogenetic stimulation? OL or CL?
         
@@ -320,7 +321,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_treck()
         self.plot_eeg(findPwaves=True, findArtifacts=True)
         self.plot_session()
-        self.graph_eeg.setRange(yRange=(-500, 500),  padding=None)
+        self.graph_eeg.setYRange(-500, 500, padding=None)
     
     #####################          GUI LAYOUT          #####################
         
@@ -350,7 +351,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.graph_spectrum.addItem(self.image_spectrum)
             self.lay_brainstate.nextRow()
             # Recording session data (FFT time; 2.5 s/bin)
-            self.graph_emgampl = self.lay_brainstate.addPlot()          
+            self.graph_emgampl = self.lay_brainstate.addPlot()     
+            self.freqband_label = pqi.FreqBandLabel()
             self.plotView.nextRow()    
             # Live data visualization (Intan time; 1000+ Hz sampling rate)
             self.arrowStart_btn = pqi.ArrowButton(parent=self)
@@ -727,18 +729,18 @@ class MainWindow(QtWidgets.QMainWindow):
                                                         parent=self.noiseWidget)
             self.noiseCalcSP_btn.hide()
             menu = QtWidgets.QMenu(self.noiseCalcSP_btn)
-            calcAction = QtWidgets.QAction('Calculate noise-excluded SP', self.noiseCalcSP_btn)
-            calcAction.setObjectName('calculate noise')
-            calcAction.triggered.connect(self.switchSP)
-            menu.addAction(calcAction)
-            loadAction = QtWidgets.QAction('Load noise-excluded SP', self.noiseCalcSP_btn)
-            loadAction.setObjectName('load noise')
-            loadAction.triggered.connect(self.switchSP)
-            menu.addAction(loadAction)
-            resetAction = QtWidgets.QAction('Load standard SP', self.noiseCalcSP_btn)
+            resetAction = QtWidgets.QAction('Load standard spectrogram', self.noiseCalcSP_btn)
             resetAction.setObjectName('load standard')
             resetAction.triggered.connect(self.switchSP)
             menu.addAction(resetAction)
+            calcAction = QtWidgets.QAction('Calculate noise-excluded spectrogram', self.noiseCalcSP_btn)
+            calcAction.setObjectName('calculate noise')
+            calcAction.triggered.connect(self.switchSP)
+            menu.addAction(calcAction)
+            loadAction = QtWidgets.QAction('Load noise-excluded spectrogram', self.noiseCalcSP_btn)
+            loadAction.setObjectName('load noise')
+            loadAction.triggered.connect(self.switchSP)
+            menu.addAction(loadAction)
             self.noiseCalcSP_btn.setMenu(menu)
             r3c1.addWidget(self.noiseReset_btn)
             r3c1.addWidget(self.noiseSave_btn)
@@ -850,7 +852,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # define name/color/enabling requirements of plot buttons
             plotBtn_ids = [('P-wave frequency', 'rgba(24,116,205,100)', ['recordPwaves']), 
                            ('P-waveforms', 'rgba(245,214,78,150)', ['recordPwaves']), 
-                           ('P-wave spectrogram', 'rgba(154,50,205,100)', ['recordPwaves']), 
+                           ('P-wave spectrogram', 'rgba(154,50,205,100)', ['recordPwaves']),
+                           ('P-wave spectrum', 'rgba(15,7,245,100)', ['recordPwaves']),
                            ('P-wave EMG', 'rgba(0,205,102,100)', ['recordPwaves', 'hasEMG']),
                            ('Laser P-wave stats', 'rgba(84,44,45,70)', ['recordPwaves', 'lsrTrigPwaves']), 
                            ('P-wave transitions\n(time-normalized)', 'rgba(0,0,0,255)', ['recordPwaves']), 
@@ -1246,9 +1249,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.validate_pwaves()   # eliminate LFP artifacts
         self.save_pdata()        # save settings and detected P-waves
         self.plotSettings = self.dict_from_vars()
-        self.recordPwaves = True
         
         # update plots
+        if self.pi.size > 0:
+            self.hasPwaves = True
+            for k in self.plotBtns_dict.keys():
+                self.plotBtns_dict[k]['btn'].enable_btn()
+                c = 'black' if self.plotBtns_dict[key]['btn'].isEnabled() else 'gray'
+                self.plotBtns_dict[key]['label'].setStyleSheet(f'color : {c}')
         self.plot_eeg(findPwaves=True, findArtifacts=True)
         self.plot_session(scale=self.tscale, scale_unit=self.tunit)
         self.setWindowTitle('Updating P-wave detection settings ... Done!')
@@ -1349,7 +1357,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pfreq = pwaves.downsample_pwaves(self.LFP_processed, self.pi, 
                                                   self.sr, int(self.fbin), 
                                                   self.M.shape[1])[3]
-            self.recordPwaves = True
+            self.hasPwaves = True
         else:
             self.pfreq = np.zeros(self.M.shape[1])
         if len(self.pfreq) == self.M.shape[1]-1:
@@ -1767,38 +1775,86 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # plot data vector(sf) in FFT time
         self.graph_emgampl.clear()
-        l = 'EMG Ampl.'; u = 'V'
-        # plot EMG amplitude
-        if self.pplot_emgampl:
-            self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
-                                    self.EMGAmpl, pen=(255,255,255))
-        # plot P-wave frequency
-        if self.pplot_pfreq:
-            self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
-                                    self.pfreq*40, pen=(255,0,0))
-            l = 'P-wave Freq'; u = ''
-        # plot DF/F calcium signal
-        if self.pplot_dff:
-            self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
-                                    self.dffdn, pen=(255,255,0))
-            l  = 'DF/F Ampl.'; u = ''
-        # plot standard deviation of LFP signal
-        if self.pplot_LFPstd:
-            self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
-                                    self.LFP_std_dn, pen=(0,255,0))
-            l = 'LFP S.D.'; u = 'V'
-        # toggle through EEG frequency band powers
-        if self.pplot_bandpwr:
-            pwr = self.band_pwrs[self.band_pointer]
-            pen = [(0,0,255),(0,255,0),(255,255,0),(255,0,255)][self.band_pointer]
-            self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, pwr, pen=pen)
-            l  = f'{list(self.bands.keys())[self.band_pointer].capitalize()} power'; u = ''
-        
-        # set axis params
-        self.graph_emgampl.setXLink(self.graph_spectrum.vb)
-        self.graph_emgampl.vb.setMouseEnabled(x=False, y=True)
+        self.freqband_label.setParentItem(None)
+        #fbl = [item for item in self.graph_emgampl.childItems() if item.objectName()=='freqbandlabel']
+        #if fbl:
+            
         limits = {'xMin' : 0, 'xMax' : self.ftime[-1]*scale}
         self.graph_emgampl.vb.setLimits(**limits)
+        l = 'EMG Ampl.'; u = 'V'
+        
+        # plot EMG amplitude
+        if self.pplot_emgampl:
+            emgamp = self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
+                                             self.EMGAmpl, pen=(255,255,255))
+            emgamp.setObjectName('emg amplitude')
+            
+        # plot P-wave frequency
+        if self.pplot_pfreq:
+            pfreq = self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
+                                            self.pfreq*40, pen=(255,0,0))
+            pfreq.setObjectName('p-wave frequency')
+            l = 'P-wave Freq'; u = ''
+            
+        # plot DF/F calcium signal
+        if self.pplot_dff:
+            dff = self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
+                                          self.dffdn, pen=(255,255,0))
+            dff.setObjectName('downsampled calcium signal')
+            l  = 'DF/F Ampl.'; u = ''
+        
+        # plot standard deviation of LFP signal
+        if self.pplot_LFPstd:
+            lfpsd = self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
+                                            self.LFP_std_dn, pen=(0,255,0))
+            lfpsd.setObjectName('downsampled LFP SD')
+            l = 'LFP S.D.'; u = 'V'
+            
+        # toggle through EEG frequency band powers, scaled to view with other signals
+        if self.pplot_bandpwr:
+            pwr = self.band_pwrs[self.band_pointer]
+            signals = [item.getData()[1] for item in self.graph_emgampl.listDataItems()]
+            if len(signals) > 0:
+                # scale band power by the plotted signal with the largest variance
+                scale_sd = max([np.nanstd(sig) for sig in signals])
+                scale_mean = min([np.nanmean(sig) for sig in signals])
+                zpwr = (pwr - np.nanmean(pwr)) / np.nanstd(pwr)
+                scale_pwr = zpwr * scale_sd + scale_mean
+                scale_pwr += scale_sd*2
+            else:
+                scale_pwr = pwr
+            
+            c = [(0,0,255),(0,255,0),(0,255,255),(255,255,0),(255,0,255),(200,125,250)]
+            pen = c[self.band_pointer]
+            fband = list(self.bands.keys())[self.band_pointer]
+            f1, f2 = self.bands[fband]
+            #self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, pwr, pen=pen)
+            pwrband = self.graph_emgampl.plot(self.ftime*scale+scale*self.fdt/2.0, 
+                                              scale_pwr, pen=pen)
+            pwrband.setObjectName(f'{fband} band power')
+            # if self.band_pointer == 2:
+            #     pdb.set_trace()
+            hexcolor = matplotlib.colors.to_hex(np.array(pen)/255)
+            #bandlabel = pqi.FreqBandLabel(f1, f2, band_name=fband, color=hexcolor)
+            self.freqband_label.set_info(f1, f2, band_name=fband, color=hexcolor)
+            #labelOpts = {'position': 0.08, 'color':(0,255,0), 'movable':True}
+            #self.curThres.label = pg.InfLineLabel(self.curThres, text='', **labelOpts)
+            #bandlabel = pg.LabelItem(text='hi mom', size='36pt', color='red')
+            #pwrband.label = bandlabel
+            #bandlabel = pg.TextItem('a label', color='red')
+            self.freqband_label.setParentItem(self.graph_emgampl)
+            #xrange, yrange = self.graph_emgampl.vb.viewRange()
+            #bandlabel.setPos(xrange[1], yrange[1])
+            #bandlabel.setPos(1,1)
+            self.freqband_label.anchor(itemPos=(1,0), parentPos=(1,0))
+            #self.graph_emgampl.addItem(bandlabel)
+            
+            l  = f'{fband.capitalize()} power'; u = ''
+        
+        # set axis params
+        self.graph_emgampl.autoRange()
+        self.graph_emgampl.setXLink(self.graph_spectrum.vb)
+        self.graph_emgampl.vb.setMouseEnabled(x=False, y=True)
         yax = self.graph_emgampl.getAxis(name='left')
         yax.setLabel(l, units=u, **labelStyle)   
         yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
@@ -1880,7 +1936,10 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # clear graph
         self.graph_eeg.clear()
-        self.graph_eeg.setRange(xRange=(self.tseq[0],self.tseq[-1]), padding=None)
+        self.graph_eeg.vb.setLimits(xMin=None, xMax=None)
+        self.graph_eeg.vb.setXRange(self.tseq[0], self.tseq[-1], padding=None)
+        xmin, xmax = self.graph_eeg.vb.viewRange()[0]
+        self.graph_eeg.vb.setLimits(xMin=xmin, xMax=xmax)
         
         # plot currently selected EEG/EMG/LFP signal
         self.curData.setData(self.tseq, self.EEG[self.ii], padding=None)
@@ -2366,14 +2425,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.ylabel = opt + ' ' + str(self.pointers[opt]+1)
                 if opt=='EEG':
                     self.eeg_spec = self.eeg_spec_list[self.pointers[opt]]
+                    self.graph_eeg.setYRange(-700, 700, padding=None)
                 elif opt=='EMG':
                     self.EMGAmpl = self.EMGAmpl_list[self.pointers[opt]]
+                    self.graph_eeg.setYRange(-700, 700, padding=None)
                 elif opt=='LFP':
                     if self.pointers[opt] == 0:
                         self.ylabel = 'LFP' if len(self.LFP_list) > 2 else 'Raw LFP 1'
                     else:
                         tmp = 0 if len(self.LFP_list) > 2 else 1
                         self.ylabel = 'Raw LFP ' + str(self.pointers[opt]+tmp)
+                    self.graph_eeg.setYRange(-500, 500, padding=None)
             else:
                 # set pointers for all other signals to 0
                 self.pointers[opt] = -1
@@ -2393,7 +2455,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if event.key() == QtCore.Qt.Key_E:
             num_eeg = len(self.EEG_list)
             if self.pointers['EEG'] < num_eeg-1:
-                self.pointers['EEG'] += 1               
+                self.pointers['EEG'] += 1   
             else:
                 self.pointers['EEG'] = 0
             self.noiseBtns_index = 2
@@ -2456,8 +2518,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # A - show/hide EMG [a]mplitude
         elif event.key() == QtCore.Qt.Key_A:
-            self.band_pointer = -1
-            self.pplot_bandpwr = False
             if self.pplot_emgampl == True:
                 self.pplot_emgampl = False
             else:
@@ -2466,8 +2526,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # D - show/hide LFP standard [d]eviation
         elif event.key() == QtCore.Qt.Key_D:
-            self.band_pointer = -1
-            self.pplot_bandpwr = False
             if self.pplot_LFPstd == True:
                 self.pplot_LFPstd = False
             else:
@@ -2476,8 +2534,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # F - show/hide P-wave [f]requency
         elif event.key() == QtCore.Qt.Key_F:
-            self.band_pointer = -1
-            self.pplot_bandpwr = False
             if self.pplot_pfreq == True:
                 self.pplot_pfreq = False
             else:
@@ -2486,8 +2542,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # G - show/hide [g]camp6 calcium signal
         elif event.key() == QtCore.Qt.Key_G:
-            self.band_pointer = -1
-            self.pplot_bandpwr = False
             if self.pplot_dff == True:
                 self.pplot_dff = False
             else:
@@ -2498,15 +2552,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # B - show EEG frequency [b]and power/switch frequency bands
         elif event.key() == QtCore.Qt.Key_B:
             if len(self.band_pwrs) > 0:
-                self.pplot_bandpwr = True
-                self.pplot_emgampl = False
-                self.pplot_pfreq = False
-                self.pplot_dff = False
-                if self.band_pointer < len(self.band_pwrs)-1:
-                    self.band_pointer += 1
-                else:
+                # start plotting with lowest freq band
+                if self.pplot_bandpwr == False:
+                    self.pplot_bandpwr = True
                     self.band_pointer = 0
+                elif self.pplot_bandpwr == True:
+                    # capital "B" clears the current freq band plot
+                    if event.text().isupper():
+                        self.pplot_bandpwr = False
+                        self.band_pointer = -1
+                    # lowercase "b" toggles through plots of each freq band
+                    elif event.text().islower():
+                        if self.band_pointer < len(self.band_pwrs)-1:
+                            self.band_pointer += 1
+                        else:
+                            self.band_pointer = 0
                 self.plot_session()
+                
             
         ###   BRAIN STATE ANNOTATION   ###
         
@@ -2671,12 +2733,12 @@ class MainWindow(QtWidgets.QMainWindow):
                         # remove sequence from noise indices
                         self.noise_idx = np.sort(np.setdiff1d(self.noise_idx, noiseSelectIdx))
                         # remove waveforms in selected sequence from "noise" list
-                        nni = np.intersect1d(self.elim_idx['elim_noise'], noiseSelectIdx)
-                        ni = np.setdiff1d(self.elim_idx['elim_noise'], nni)
+                        nni = np.intersect1d(self.elim_idx['elim_noise'], noiseSelectIdx)  # clean!
+                        ni = np.setdiff1d(self.elim_idx['elim_noise'], nni)          # still noise!
                         self.elim_idx['elim_noise'] = np.sort(ni).astype('int')
                         # check if noise waveforms were eliminated by amp/width/dup/user
                         awd = np.concatenate([val for val in list(self.elim_idx.values())[0:3]])
-                        ci = np.setdiff1d(ni, np.concatenate((awd,self.elim_user)))
+                        ci = np.setdiff1d(nni, np.concatenate((awd,self.elim_user)))
                         # add clean waveforms to $self.pi
                         self.pi = np.sort(np.append(self.pi, ci))
                         # calculate new P-wave frequency
@@ -2778,10 +2840,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.plot_treck(scale=1/3600.)  
         
         # s - save file
-        elif event.key() == QtCore.Qt.Key_S:    
+        elif event.key() == QtCore.Qt.Key_S:
+            self.setWindowTitle('Annotation saved!')
             rewrite_remidx(self.M, self.K, self.ppath, self.name, mode=0)
             self.plot_brainstate(self.tscale)
             self.plot_eeg(findPwaves=False, findArtifacts=False)
+            time.sleep(1)
+            self.setWindowTitle(self.name)
         
         event.accept()
     
@@ -2929,6 +2994,8 @@ class MainWindow(QtWidgets.QMainWindow):
         npath = os.path.join(self.ppath, self.name, f'sp_nannoise_{self.name}.mat')
         loadAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'load noise')
         loadAction.setEnabled(os.path.exists(npath))
+        resetAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'load standard')
+        resetAction.setEnabled(False)
         
         self.ftime = np.squeeze(spec['t'])        # vector of SP timepoints
         self.fdt = float(np.squeeze(spec['dt']))  # SP time resolution (e.g. 2.5)
@@ -2940,8 +3007,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # calculate power of frequency bands
         self.band_pointer = -1
-        self.bands = {'delta':[0.5, 4.5], 'sigma':[10, 15], 
-                      'theta':[6, 9.5], 'beta':[15.5, 20]}
+        self.bands = {'delta':[0.5, 4.5], 'theta':[6, 9.5], 'high-theta':[8,15],
+                      'sigma':[10, 15], 'beta':[15.5, 20], 'gamma':[50,55]}
+                       
         self.band_pwrs = []
         for b in self.bands.values():
             f1 = np.where(self.freq >= b[0])[0]
@@ -3053,15 +3121,12 @@ class MainWindow(QtWidgets.QMainWindow):
         n = self.sender().objectName()
         if 'noise' in n:
             if 'load' in n:
-                print('Loading noise-excluded EEG spectrogram ...')
                 SP = AS.noise_EEGspectrogram(self.ppath, self.name, recalc_sp=False)[0]
             elif 'calculate' in n:
-                self.save_pdata()
-                print('Calculating noise-excluded EEG spectrogram ...')
+                #self.save_pdata()
                 SP = AS.noise_EEGspectrogram(self.ppath, self.name, recalc_sp=True,
                                              noise_idx=self.eeg_noise_idx)[0]
         elif 'standard' in n:
-            print('Loading standard EEG spectrogram ...')
             SP = so.loadmat(os.path.join(self.ppath, self.name, 
                                          'sp_' + self.name + '.mat'))['SP']
         # replace main EEG spectrogram with loaded/calculated SP, recalculate freq bands
@@ -3072,7 +3137,6 @@ class MainWindow(QtWidgets.QMainWindow):
             ifreq = np.intersect1d(f1,f2)
             fpwr = np.nansum(self.eeg_spec_list[0][ifreq,:], axis=0)
             self.band_pwrs[i] = fpwr
-        print('Done!')
         # show raw EEG1 signal and updated EEG1 SP on plot
         self.pointers['EEG'] = 0
         self.pointers['EMG'] = -1
@@ -3082,10 +3146,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ylabel = 'EEG1'
         self.plot_eeg(findPwaves=False, findArtifacts=False)
         self.plot_session(scale=self.tscale, scale_unit=self.tunit)
+        self.graph_eeg.setYRange(-700, 700, padding=None)
         # enable option to load noise-excluded SP if file exists
         npath = os.path.join(self.ppath, self.name, f'sp_nannoise_{self.name}.mat')
         loadAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'load noise')
-        loadAction.setEnabled(os.path.exists(npath))
+        resetAction = self.noiseCalcSP_btn.findChild(QtWidgets.QAction, 'load standard')
+        # disable option to load the currently displayed SP
+        if np.nonzero(np.isnan(SP))[0].size > 0:
+            loadAction.setEnabled(False)
+            resetAction.setEnabled(True)
+        else:
+            loadAction.setEnabled(os.path.exists(npath))
+            resetAction.setEnabled(False)
         
     
     def plotFigure(self):
@@ -3154,13 +3226,26 @@ elif platform.system() == 'Linux':
     
 #name = 'Salinger_073020n1'
 
-ppath = '/home/fearthekraken/Documents/Data/sleepRec_processed/'
-name = 'Olaf_111720n1'
+#ppath = '/home/fearthekraken/Documents/Data/sleepRec_processed/'
+#ppath ='/media/fearthekraken/Mandy_HardDrive1/nrem_transitions/'
+ppath ='/media/fearthekraken/Mandy_HardDrive1/nrem_transitions/tmp/'
 
-# if ppath == '' or name == '':
-#     ddir = QtWidgets.QFileDialog().getExistingDirectory(parent=None,
-#                                                         caption="Choose recording folder", 
-#                                                         directory = ppath)
+#name = 'Dante_062922n1'
+
+#name = 'Virgil_062122n1'
+
+name = 'Cervantes_090720n1' # E
+#name = 'Snicket_062222n1'  # E
+#name = 'Gaiman_062422n1' (both)  # E
+#name = 'Snicket_062922n1'  # E
+#name = 'Twain_090420n1'  # C
+
+#name = 'Dante_061722n1'  # C
+#name = 'Dahl_030321n1'   # C
+#name = 'Twain_101320n1'  # C
+#name = 'Dahl_031021n1'   # E
+#name = 'Salinger_071920n1'  # E
+#name = 'Poe_071220n1'  # E
     
     
 app = QtWidgets.QApplication([])

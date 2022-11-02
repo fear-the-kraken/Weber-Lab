@@ -63,6 +63,9 @@ class FigureWindow(QtWidgets.QDialog):
                                 'Single P-wave spectrogram' : {'widgets':['dataWidget', 'spWidget'], 
                                                                'fx':self.plot_single_sp, 'req_pwaves':True, 'time_res':'event',
                                                                'data_params':['win']},
+                                'P-wave spectrum'           : {'widgets':['dataWidget', 'brstateWidget', 'pwaveWidget', 'spWidget'],
+                                                               'fx':self.plot_pwave_spectrum, 'req_pwaves':True, 'time_res':'event',
+                                                               'data_params':['win', 'excl_win', 'ci']},
                                 'P-wave EMG'                : {'widgets':['dataWidget', 'brstateWidget', 'pwaveWidget', 'emgWidget'], 
                                                                'fx':self.plot_avg_pwave_emg, 'req_pwaves':True, 'time_res':'event',
                                                                'data_params':['win', 'mouse_avg', 'ci']},
@@ -124,6 +127,7 @@ class FigureWindow(QtWidgets.QDialog):
             else:
                 self.win = [-0.5,0.5]  # time window (s) surrounding event
             self.lsr_win = [0, 1]      # time window (s) surrounding laser pulse
+            self.excl_win = [-0.5,0.5] # time window (s) surrounding event to exclude in control data
             self.pre = 120             # time (s) preceding event
             self.post = 240            # time (s) following event
             self.mouse_avg = 'trial'   # average data by 'trial', ['rec']ording, or 'mouse'
@@ -156,7 +160,8 @@ class FigureWindow(QtWidgets.QDialog):
             self.nsr_seg = 2             # FFT bin size (s)
             self.perc_overlap = 0.95     # FFT bin overlap (%)
             self.recalc_highres = False  # recalculate high-res spectrogram?
-            if self.plotTypeWidgets[self.plotType]['time_res']=='state':
+            if self.plotTypeWidgets[self.plotType]['time_res']=='state' \
+            or 'spectrum' in self.plotType:
                 self.pnorm = 0  # normalization method (0=none, 1=by recording)
             elif self.plotTypeWidgets[self.plotType]['time_res']=='event':
                 self.pnorm = 2  # 2=by time window; option for event-centered SP only
@@ -221,7 +226,8 @@ class FigureWindow(QtWidgets.QDialog):
             self.plotSettings = {}
         
         # adjust initial brainstate and data collection window for specific plots
-        self.istate = [1] if self.plotType in ['P-wave spectrogram', 'P-wave DF/F', 'EMG twitches'] else [1,2,3,4]
+        REMplots = ['P-wave spectrogram', 'P-wave spectrum', 'P-wave DF/F', 'EMG twitches']
+        self.istate = [1] if self.plotType in REMplots else [1,2,3,4]
         if self.plotType == 'Single P-wave DF/F':
             self.dff_psm = []
             self.dff_vm = []
@@ -307,7 +313,6 @@ class FigureWindow(QtWidgets.QDialog):
             self.settingsWidget.setLineWidth(4)
             self.settingsWidget.setMidLineWidth(2)
             self.settingsLayout = QtWidgets.QVBoxLayout(self.settingsWidget)
-            
             # title
             self.titleWidget = QtWidgets.QWidget()
             self.titleWidget.setFixedHeight(pqi.px_h(50, self.HEIGHT))
@@ -387,14 +392,13 @@ class FigureWindow(QtWidgets.QDialog):
             self.dataLayout.setSpacing(hspace10)
             lay2 = QtWidgets.QHBoxLayout()
             lay2.setContentsMargins(0,0,0,0)
-            lay2.setSpacing(wspace5)
             title2 = QtWidgets.QLabel('Data Collection Parameters')
             title2.setAlignment(QtCore.Qt.AlignCenter)
             title2.setFixedHeight(titleHeight)
             title2.setFont(subheaderFont)
             # time window (s) to collect relative to P-waves
             c1_w = QtWidgets.QWidget()
-            c1_w.setMinimumWidth(pqi.px_w(135, self.WIDTH))
+            c1_w.setMinimumWidth(pqi.px_w(110, self.WIDTH))
             c1 = QtWidgets.QVBoxLayout(c1_w)
             c1.setContentsMargins(0,0,0,0)
             c1.setSpacing(hspace5)
@@ -407,7 +411,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.preWin_val.setFont(font)
             self.preWin_val.setMinimum(-500)
             self.preWin_val.setMaximum(0)
-            self.preWin_val.setDecimals(2)
+            self.preWin_val.setDecimals(1)
             self.preWin_val.setSingleStep(0.1)
             self.preWin_val.setSuffix (' s')
             win_dash = QtWidgets.QLabel(' - ')
@@ -417,7 +421,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.postWin_val.setFont(font)
             self.postWin_val.setMinimum(0)
             self.postWin_val.setMaximum(500)
-            self.postWin_val.setDecimals(2)
+            self.postWin_val.setDecimals(1)
             self.postWin_val.setSingleStep(0.1)
             self.postWin_val.setSuffix (' s')
             c1r2.addWidget(self.preWin_val, stretch=2)
@@ -427,7 +431,7 @@ class FigureWindow(QtWidgets.QDialog):
             c1.addLayout(c1r2)
             # time window (s) to collect relative to laser pulses
             c2_w = QtWidgets.QWidget()
-            c2_w.setMinimumWidth(pqi.px_w(130, self.WIDTH))
+            c2_w.setMinimumWidth(pqi.px_w(110, self.WIDTH))
             c2 = QtWidgets.QVBoxLayout(c2_w)
             c2.setContentsMargins(0,0,0,0)
             c2.setSpacing(hspace5)
@@ -440,7 +444,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.preWinLsr_val.setFont(font)
             self.preWinLsr_val.setMinimum(-500)
             self.preWinLsr_val.setMaximum(0)
-            self.preWinLsr_val.setDecimals(2)
+            self.preWinLsr_val.setDecimals(1)
             self.preWinLsr_val.setSingleStep(0.1)
             self.preWinLsr_val.setSuffix (' s')
             self.winLsr_dash = QtWidgets.QLabel(' - ')
@@ -450,7 +454,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.postWinLsr_val.setFont(font)
             self.postWinLsr_val.setMinimum(0)
             self.postWinLsr_val.setMaximum(500)
-            self.postWinLsr_val.setDecimals(2)
+            self.postWinLsr_val.setDecimals(1)
             self.postWinLsr_val.setSingleStep(0.1)
             self.postWinLsr_val.setSuffix (' s')
             c2r2.addWidget(self.preWinLsr_val, stretch=2)
@@ -458,53 +462,86 @@ class FigureWindow(QtWidgets.QDialog):
             c2r2.addWidget(self.postWinLsr_val, stretch=2)
             c2.addWidget(self.winLsr_label)
             c2.addLayout(c2r2)
-            # data averaging method dropdown
+            # time window (s) to exclude when collecting control (non-event) data
             c3_w = QtWidgets.QWidget()
-            c3_w.setMinimumWidth(pqi.px_w(83, self.WIDTH))
+            c3_w.setMinimumWidth(pqi.px_w(110, self.WIDTH))
             c3 = QtWidgets.QVBoxLayout(c3_w)
             c3.setContentsMargins(0,0,0,0)
             c3.setSpacing(hspace5)
+            self.winExcl_label = QtWidgets.QLabel('Exclusion Window')
+            self.winExcl_label.setFont(font)
+            self.winExcl_label.setAlignment(QtCore.Qt.AlignCenter)
+            c3r2 = QtWidgets.QHBoxLayout()
+            c3r2.setSpacing(0)
+            self.preWinExcl_val = QtWidgets.QDoubleSpinBox()
+            self.preWinExcl_val.setFont(font)
+            self.preWinExcl_val.setMinimum(-500)
+            self.preWinExcl_val.setMaximum(0)
+            self.preWinExcl_val.setDecimals(1)
+            self.preWinExcl_val.setSingleStep(0.1)
+            self.preWinExcl_val.setSuffix (' s')
+            self.winExcl_dash = QtWidgets.QLabel(' - ')
+            self.winExcl_dash.setFont(font)
+            self.winExcl_dash.setAlignment(QtCore.Qt.AlignCenter)
+            self.postWinExcl_val = QtWidgets.QDoubleSpinBox()
+            self.postWinExcl_val.setFont(font)
+            self.postWinExcl_val.setMinimum(0)
+            self.postWinExcl_val.setMaximum(500)
+            self.postWinExcl_val.setDecimals(1)
+            self.postWinExcl_val.setSingleStep(0.1)
+            self.postWinExcl_val.setSuffix (' s')
+            c3r2.addWidget(self.preWinExcl_val, stretch=2)
+            c3r2.addWidget(self.winExcl_dash, stretch=0)
+            c3r2.addWidget(self.postWinExcl_val, stretch=2)
+            c3.addWidget(self.winExcl_label)
+            c3.addLayout(c3r2)
+            # data averaging method dropdown
+            c4_w = QtWidgets.QWidget()
+            c4_w.setMinimumWidth(pqi.px_w(83, self.WIDTH))
+            c4 = QtWidgets.QVBoxLayout(c4_w)
+            c4.setContentsMargins(0,0,0,0)
+            c4.setSpacing(hspace5)
             dataAvg_label = QtWidgets.QLabel('Avg. by')
             dataAvg_label.setFont(font)
             dataAvg_label.setAlignment(QtCore.Qt.AlignCenter)
             self.dataAvg_type = QtWidgets.QComboBox()
             self.dataAvg_type.setFont(font)
             self.dataAvg_type.addItems(['Trial', 'Recording', 'Mouse'])
-            c3.addWidget(dataAvg_label)
-            c3.addWidget(self.dataAvg_type)
+            c4.addWidget(dataAvg_label)
+            c4.addWidget(self.dataAvg_type)
             # EMG twitch averaging method dropdown
-            c4_w = QtWidgets.QWidget()
-            c4 = QtWidgets.QVBoxLayout(c4_w)
-            c4.setContentsMargins(0,0,0,0)
-            c4.setSpacing(hspace5)
+            c5_w = QtWidgets.QWidget()
+            c5 = QtWidgets.QVBoxLayout(c5_w)
+            c5.setContentsMargins(0,0,0,0)
+            c5.setSpacing(hspace5)
             twitchAvg_label = QtWidgets.QLabel('Average across')
             twitchAvg_label.setFont(font)
             twitchAvg_label.setAlignment(QtCore.Qt.AlignCenter)
             self.twitchAvg_type = QtWidgets.QComboBox()
             self.twitchAvg_type.setFont(font)
             self.twitchAvg_type.addItems(['All REM sleep', 'Each REM period'])
-            c4.addWidget(twitchAvg_label)
-            c4.addWidget(self.twitchAvg_type)
+            c5.addWidget(twitchAvg_label)
+            c5.addWidget(self.twitchAvg_type)
             # error bar type dropdown
-            c5_w = QtWidgets.QWidget()
-            c5_w.setMinimumWidth(pqi.px_w(70, self.WIDTH))
-            c5 = QtWidgets.QVBoxLayout(c5_w)
-            c5.setContentsMargins(0,0,0,0)
-            c5.setSpacing(hspace5)
+            c6_w = QtWidgets.QWidget()
+            c6_w.setMinimumWidth(pqi.px_w(70, self.WIDTH))
+            c6 = QtWidgets.QVBoxLayout(c6_w)
+            c6.setContentsMargins(0,0,0,0)
+            c6.setSpacing(hspace5)
             error_label = QtWidgets.QLabel('Error')
             error_label.setAlignment(QtCore.Qt.AlignCenter)
             error_label.setFont(font)
             self.error_type = QtWidgets.QComboBox()
             self.error_type.setFont(font)
             self.error_type.addItems(['S.E.M.', 'S.D.', '95% CI'])
-            c5.addWidget(error_label)
-            c5.addWidget(self.error_type)
+            c6.addWidget(error_label)
+            c6.addWidget(self.error_type)
             # data smoothing factor
-            c6_w = QtWidgets.QWidget()
-            c6_w.setMinimumWidth(pqi.px_w(70, self.WIDTH))
-            c6 = QtWidgets.QVBoxLayout(c6_w)
-            c6.setContentsMargins(0,0,0,0)
-            c6.setSpacing(hspace5)
+            c7_w = QtWidgets.QWidget()
+            c7_w.setMinimumWidth(pqi.px_w(70, self.WIDTH))
+            c7 = QtWidgets.QVBoxLayout(c7_w)
+            c7.setContentsMargins(0,0,0,0)
+            c7.setSpacing(hspace5)
             smoothing_label = QtWidgets.QLabel('Smooth')
             smoothing_label.setFont(font)
             smoothing_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -512,22 +549,23 @@ class FigureWindow(QtWidgets.QDialog):
             self.smooth_val.setFont(font)
             self.smooth_val.setMaximum(9999)
             self.smooth_val.setDecimals(0)
-            c6.addWidget(smoothing_label)
-            c6.addWidget(self.smooth_val)
+            c7.addWidget(smoothing_label)
+            c7.addWidget(self.smooth_val)
             # signal type dropdown
-            c7_w = QtWidgets.QWidget()
-            c7_w.setMinimumWidth(pqi.px_w(55, self.WIDTH))
-            c7 = QtWidgets.QVBoxLayout(c7_w)
-            c7.setContentsMargins(0,0,0,0)
-            c7.setSpacing(hspace5)
+            c8_w = QtWidgets.QWidget()
+            c8_w.setMinimumWidth(pqi.px_w(55, self.WIDTH))
+            c8 = QtWidgets.QVBoxLayout(c8_w)
+            c8.setContentsMargins(0,0,0,0)
+            c8.setSpacing(hspace5)
             signal_label = QtWidgets.QLabel('Signal')
             signal_label.setFont(font)
             signal_label.setAlignment(QtCore.Qt.AlignCenter)
             self.signalType = QtWidgets.QComboBox()
             self.signalType.setFont(font)
             self.signalType.addItems(['LFP', 'EMG', 'EEG', 'EEG2'])
-            c7.addWidget(signal_label)
-            c7.addWidget(self.signalType)
+            c8.addWidget(signal_label)
+            c8.addWidget(self.signalType)
+            # add widgets to layout
             lay2.addWidget(c1_w)
             lay2.addWidget(c2_w)
             lay2.addWidget(c3_w)
@@ -535,21 +573,25 @@ class FigureWindow(QtWidgets.QDialog):
             lay2.addWidget(c5_w)
             lay2.addWidget(c6_w)
             lay2.addWidget(c7_w)
+            lay2.addWidget(c8_w)
             # hide params not used in plot
             if 'win' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c1_w.hide()
             if 'lsr_win' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c2_w.hide()
-            if 'mouse_avg' not in self.plotTypeWidgets[self.plotType]['data_params']:
+            if 'excl_win' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c3_w.hide()
-            if 'twitch_avg' not in self.plotTypeWidgets[self.plotType]['data_params']:
+            if 'mouse_avg' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c4_w.hide()
-            if 'ci' not in self.plotTypeWidgets[self.plotType]['data_params']:
+            if 'twitch_avg' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c5_w.hide()
-            if 'sf' not in self.plotTypeWidgets[self.plotType]['data_params']:
+            if 'ci' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c6_w.hide()
-            if 'signal' not in self.plotTypeWidgets[self.plotType]['data_params']:
+            if 'sf' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c7_w.hide()
+            if 'signal' not in self.plotTypeWidgets[self.plotType]['data_params']:
+                c8_w.hide()
+            lay2.setSpacing(wspace10)
             line_2 = pqi.vline(orientation='h')
             self.dataLayout.addWidget(title2)
             self.dataLayout.addLayout(lay2)
@@ -591,7 +633,8 @@ class FigureWindow(QtWidgets.QDialog):
                 self.plotStates[i] = btn
                 if state != 'REM':
                     btn.setDisabled(self.plotType == 'EMG twitches')
-            self.state_btn_grp1.setExclusive(self.plotType in ['P-wave spectrogram', 
+            self.state_btn_grp1.setExclusive(self.plotType in ['P-wave spectrogram',
+                                                               'P-wave spectrum',
                                                                'P-wave DF/F', 
                                                                'EMG twitches'])
             r1_b2w = QtWidgets.QFrame()
@@ -611,7 +654,7 @@ class FigureWindow(QtWidgets.QDialog):
             state_btn_grp2.addButton(self.plotAllStates_btn)
             r1_b2.addWidget(self.plotEachState_btn)
             r1_b2.addWidget(self.plotAllStates_btn)
-            tmp = ['P-wave spectrogram', 'Sleep timecourse', 'EMG twitches']
+            tmp = ['P-wave spectrogram', 'P-wave spectrum', 'Sleep timecourse', 'EMG twitches']
             self.plotEachState_btn.setDisabled(self.plotType in tmp)
             self.plotAllStates_btn.setDisabled(self.plotType in tmp)
             self.plotEachState_btn.setChecked(self.plotType not in tmp)
@@ -622,8 +665,9 @@ class FigureWindow(QtWidgets.QDialog):
             stateseqLayout.setContentsMargins(0,0,0,0)
             stateseqLayout.setVerticalSpacing(0)
             stateseqLayout.setHorizontalSpacing(wspace5 - wspace1)
-            spcr1,spcr2 = [pqi.px_w(100, self.WIDTH), pqi.px_h(50, self.HEIGHT)]
-            stateseqLayout.addItem(QtWidgets.QSpacerItem(spcr1,spcr2,QtWidgets.QSizePolicy.Maximum), 0, 0, 3, 1)
+            wspc,hspc = [pqi.px_w(100, self.WIDTH), pqi.px_h(50, self.HEIGHT)]
+            qspacer = QtWidgets.QSpacerItem(wspc,hspc,QtWidgets.QSizePolicy.Maximum)
+            stateseqLayout.addItem(qspacer, 0, 0, 3, 1)
             maxStates = 4 if 'time-normalized' in self.plotType else 2 
             data = [d[0:maxStates] for d in [self.sequence, self.nstates, self.sign, self.state_thres]]
             self.sequence, self.nstates, self.sign, self.state_thres = data
@@ -684,7 +728,8 @@ class FigureWindow(QtWidgets.QDialog):
                                         'image : url("icons/arrowR_icon.png");'
                                         'image-position : center }')
                     arrow.setFixedWidth(wspace10)
-                    stateseqLayout.addWidget(arrow, 0, i*2+2, 1, 1, alignment=QtCore.Qt.AlignCenter)
+                    stateseqLayout.addWidget(arrow, 0, i*2+2, 1, 1, 
+                                             alignment=QtCore.Qt.AlignCenter)
                     arrow.hide()
             # buttons to add or subtract state
             self.addState_btn = QtWidgets.QPushButton()
@@ -719,14 +764,15 @@ class FigureWindow(QtWidgets.QDialog):
                                                 '{ background-color : rgba(220,220,220,255);'
                                                 'image : url("icons/minusDisabled_icon.png") }')
             self.removeState_btn.setDisabled(len(self.sequence)==2)
+            qspacer = QtWidgets.QSpacerItem(wspc,hspc,QtWidgets.QSizePolicy.Maximum)
             if maxStates > 2:
                 stateseqLayout.addWidget(self.addState_btn, 0, 8, 1, 1, 
                                          alignment=QtCore.Qt.AlignCenter | QtCore.Qt.AlignRight)
                 stateseqLayout.addWidget(self.removeState_btn, 1, 8, 1, 1, 
                                          alignment=QtCore.Qt.AlignCenter | QtCore.Qt.AlignRight)
-                stateseqLayout.addItem(QtWidgets.QSpacerItem(spcr1,spcr2,QtWidgets.QSizePolicy.Maximum), 0, 9, 3, 1)
+                stateseqLayout.addItem(qspacer, 0, 9, 3, 1)
             else:
-                stateseqLayout.addItem(QtWidgets.QSpacerItem(spcr1,spcr2,QtWidgets.QSizePolicy.Maximum), 0, 8, 3, 1)
+                stateseqLayout.addItem(qspacer, 0, 8, 3, 1)
             
             # adjust brainstate annotation to handle MAs/transition states/noise
             r2 = QtWidgets.QGridLayout()
@@ -985,7 +1031,8 @@ class FigureWindow(QtWidgets.QDialog):
             self.spNorm_type = QtWidgets.QComboBox()
             self.spNorm_type.setFont(font)
             self.spNorm_type.addItems(['None','Recording'])
-            if self.plotTypeWidgets[self.plotType]['time_res']=='event':
+            if self.plotTypeWidgets[self.plotType]['time_res']=='event' \
+            and 'spectrum' not in self.plotType:
                 self.spNorm_type.addItems(['Time window'])
             r1b4.addWidget(spNorm_label)
             r1b4.addWidget(self.spNorm_type, alignment=QtCore.Qt.AlignCenter)
@@ -1453,9 +1500,11 @@ class FigureWindow(QtWidgets.QDialog):
             r1c2.setContentsMargins(0,pqi.px_h(7,self.HEIGHT),0,pqi.px_h(7,self.HEIGHT))
             r1c2.setSpacing(hspace10)
             btn_grp5 = QtWidgets.QButtonGroup(self.twitchWidget)
-            self.twitchThresAllREM_btn = QtWidgets.QRadioButton('All REM sleep', self.twitchWidget)
+            self.twitchThresAllREM_btn = QtWidgets.QRadioButton('All REM sleep', 
+                                                                self.twitchWidget)
             self.twitchThresAllREM_btn.setFont(font)
-            self.twitchThresEachREM_btn = QtWidgets.QRadioButton('Each REM bout', self.twitchWidget)
+            self.twitchThresEachREM_btn = QtWidgets.QRadioButton('Each REM bout', 
+                                                                 self.twitchWidget)
             self.twitchThresEachREM_btn.setFont(font)
             btn_grp5.addButton(self.twitchThresAllREM_btn)
             btn_grp5.addButton(self.twitchThresEachREM_btn)
@@ -1667,9 +1716,11 @@ class FigureWindow(QtWidgets.QDialog):
             self.laserPlotMode_label.setFont(font)
             self.laserPlotMode_label.setAlignment(QtCore.Qt.AlignCenter)
             btn_grp8 = QtWidgets.QButtonGroup(self.laserWidget)
-            self.laserPwaveMode_btn = QtWidgets.QRadioButton('P-waves', self.laserWidget)
+            self.laserPwaveMode_btn = QtWidgets.QRadioButton('P-waves', 
+                                                             self.laserWidget)
             self.laserPwaveMode_btn.setFont(font)
-            self.laserLaserMode_btn = QtWidgets.QRadioButton('Laser pulses', self.laserWidget)
+            self.laserLaserMode_btn = QtWidgets.QRadioButton('Laser pulses', 
+                                                             self.laserWidget)
             self.laserLaserMode_btn.setFont(font)
             btn_grp8.addButton(self.laserPwaveMode_btn)
             btn_grp8.addButton(self.laserLaserMode_btn)
@@ -1837,8 +1888,9 @@ class FigureWindow(QtWidgets.QDialog):
             
         except Exception as e:
             print('whoopsie')
+            pdb.set_trace()
             print(e)
-            import sys; sys.exit()
+            #import sys; sys.exit()
     
     
     def connect_buttons(self):
@@ -1856,6 +1908,13 @@ class FigureWindow(QtWidgets.QDialog):
         self.postWin_val.valueChanged.connect(self.update_win_params)
         self.preWinLsr_val.valueChanged.connect(self.update_win_params)
         self.postWinLsr_val.valueChanged.connect(self.update_win_params)
+        self.preWinExcl_val.valueChanged.connect(self.update_win_params)
+        self.postWinExcl_val.valueChanged.connect(self.update_win_params)
+        if self.plotType == 'P-wave spectrum':
+            self.preWin_val.valueChanged.connect(self.sync_win_vals)
+            self.postWin_val.valueChanged.connect(self.sync_win_vals)
+            self.preWinExcl_val.valueChanged.connect(self.sync_win_vals)
+            self.postWinExcl_val.valueChanged.connect(self.sync_win_vals)
         self.dataAvg_type.currentTextChanged.connect(self.update_win_params)
         self.twitchAvg_type.currentTextChanged.connect(self.update_win_params)
         self.error_type.currentTextChanged.connect(self.update_win_params)
@@ -2075,12 +2134,31 @@ class FigureWindow(QtWidgets.QDialog):
         # update P-wave and laser window
         self.win = [round(self.preWin_val.value(),2), round(self.postWin_val.value(),2)]
         self.lsr_win = [float(self.preWinLsr_val.value()), float(self.postWinLsr_val.value())]
+        self.excl_win = [float(self.preWinExcl_val.value()), float(self.postWinExcl_val.value())]
         self.mouse_avg = self.dataAvg_type.currentText().lower()
         self.twitch_avg = self.twitchAvg_type.currentText().lower().split(' ')[0]
         self.ci = self.error_type.currentText().lower().replace('.','').split('%')[0]
         self.sf = int(self.smooth_val.value())
         self.signal_type = self.signalType.currentText()
-            
+    
+    
+    def sync_win_vals(self):
+        """
+        Allow only one unique value for a data collection time window
+         e.g. win = 5 --> analyze 10 seconds (5 pre, 5 post) surrounding event
+        """
+        # connect spinbox values for P-wave collection window
+        if self.sender() == self.preWin_val:
+            self.postWin_val.setValue(np.abs(self.preWin_val.value()))
+        elif self.sender() == self.postWin_val:
+            self.preWin_val.setValue(-np.abs(self.postWin_val.value()))
+        
+        # connect spinbox values for control data exclusion window
+        elif self.sender() == self.preWinExcl_val:
+            self.postWinExcl_val.setValue(np.abs(self.preWinExcl_val.value()))
+        elif self.sender() == self.postWinExcl_val:
+            self.preWinExcl_val.setValue(-np.abs(self.postWinExcl_val.value()))
+    
         
     def update_brainstate_params(self):
         """
@@ -2340,25 +2418,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.spVmMax_val.setMaximum(maxval)
             self.spVmMax_val.setDecimals(decimals)
             
-            # if self.pnorm > 0:
-            #     self.spVmMin_val.setSingleStep(0.1)
-            #     self.spVmMin_val.setMinimum(-50)
-            #     self.spVmMin_val.setMaximum(50)
-            #     self.spVmMin_val.setDecimals(1)
-            #     self.spVmMax_val.setSingleStep(0.1)
-            #     self.spVmMax_val.setMinimum(-50)
-            #     self.spVmMax_val.setMaximum(50)
-            #     self.spVmMax_val.setDecimals(1)
-            # else:
-            #     self.spVmMin_val.setSingleStep(10)
-            #     self.spVmMin_val.setMinimum(-5000)
-            #     self.spVmMin_val.setMaximum(5000)
-            #     self.spVmMin_val.setDecimals(0)
-            #     self.spVmMax_val.setSingleStep(10)
-            #     self.spVmMax_val.setMinimum(-5000)
-            #     self.spVmMax_val.setMaximum(5000)
-            #     self.spVmMax_val.setDecimals(0)
-    
+            
     def switch_emg_source(self):
         """
         Update EMG amplitude filtering params when user switches the EMG source
@@ -2393,7 +2453,7 @@ class FigureWindow(QtWidgets.QDialog):
         # load EMG twitch variables from saved dictionary
         if not sfile:
             sfile = QtWidgets.QFileDialog().getOpenFileName(self, "Load your settings", 
-                                                           os.path.join(self.ppath, self.name), 
+                                                            os.path.join(self.ppath, self.name), 
                                                            "Dictionaries (*.pkl)")[0]
         if sfile:
             with open(sfile, mode='rb') as f:
@@ -2518,25 +2578,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.twitchThres_val.setMaximum(maxval)
             self.twitchThres_val.setDecimals(decimals)
             self.twitchThres_val.setSingleStep(singlestep)
-            # # twitch threshold type
-            # if self.twitchThres_type.currentIndex() == 0:
-            #     self.twitch_thres_type = 'raw'
-            #     self.twitchThres_val.setSuffix(' uV')
-            #     self.twitchThres_val.setMaximum(50)
-            #     self.twitchThres_val.setDecimals(1)
-            #     self.twitchThres_val.setSingleStep(0.1)
-            # elif self.twitchThres_type.currentIndex() == 1:
-            #     self.twitch_thres_type = 'std'
-            #     self.twitchThres_val.setSuffix(' s.t.d')
-            #     self.twitchThres_val.setMaximum(10)
-            #     self.twitchThres_val.setDecimals(1)
-            #     self.twitchThres_val.setSingleStep(0.1)
-            # elif self.twitchThres_type.currentIndex() == 2:
-            #     self.thres_type = 'perc'
-            #     self.twitchThres_val.setSuffix(' %')
-            #     self.twitchThres_val.setMaximum(100)
-            #     self.twitchThres_val.setDecimals(1)
-            #     self.twitchThres_val.setSingleStep(1)
+
             # update twitch threshold mode
             if self.twitchThresAllREM_btn.isChecked():
                 self.twitch_thres_mode = 1
@@ -2660,6 +2702,7 @@ class FigureWindow(QtWidgets.QDialog):
                  'num_bins' : int(self.num_bins),
                  'win' : list(self.win),
                  'lsr_win' : list(self.lsr_win),
+                 'excl_win' : list(self.excl_win),
                  'pre' : float(self.pre),
                  'post' : float(self.post),
                  'mouse_avg' : str(self.mouse_avg),
@@ -2747,6 +2790,8 @@ class FigureWindow(QtWidgets.QDialog):
         self.postWin_val.setValue(ddict['win'][1])
         self.preWinLsr_val.setValue(ddict['lsr_win'][0])
         self.postWinLsr_val.setValue(ddict['lsr_win'][1])
+        self.preWinExcl_val.setValue(ddict['excl_win'][0])
+        self.postWinExcl_val.setValue(ddict['excl_win'][1])
         self.dataAvg_type.setCurrentText(ddict['mouse_avg'].capitalize())
         i = ['all', 'each'].index(ddict['twitch_avg'])
         self.dataAvg_type.setCurrentIndex(i)
@@ -2922,6 +2967,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.num_bins = ddict['num_bins']
             self.win = ddict['win']
             self.lsr_win = ddict['lsr_win']
+            self.excl_win = ddict['excl_win']
             self.pre = ddict['pre']
             self.post = ddict['post']
             self.mouse_avg = ddict['mouse_avg']
@@ -3937,6 +3983,68 @@ class FigureWindow(QtWidgets.QDialog):
             ylab = 'Norm. power' if self.pnorm else 'Spectral density ($\mathrm{\mu V^2/Hz}$)'
             ax.set_ylabel(ylab)
             ax.set_xlabel('Freq. (Hz)' if len(self.istate)-1 else '')
+        self.canvas.draw()
+        self.cleanup()
+    
+    
+    def plot_pwave_spectrum(self):
+        """
+        Plot averaged power spectrums of brain states with and without P-waves
+        """
+        self.fig.clear()
+        rec = [self.name] if len(self.recordings)==0 else self.recordings[0]
+        
+        self.setWindowTitle('Calculating power spectrums ...')
+        df = sleepy.sleep_spectrum_pwaves(self.ppath, rec, win_inc=self.win[1], 
+                                          win_exc=self.excl_win[1], istate=self.istate[0], 
+                                          pnorm=self.pnorm, nsr_seg=self.nsr_seg,
+                                          perc_overlap=self.perc_overlap, fmax=self.fmax,
+                                          recalc_highres=self.recalc_highres, 
+                                          tstart=self.tstart, tend=self.tend, ci=self.ci,
+                                          ma_thr=self.ma_thr, ma_state=self.ma_state,
+                                          flatten_is=self.flatten_is, p_iso=self.p_iso,
+                                          pcluster=self.pcluster, clus_event=self.clus_event, 
+                                          exclude_noise=self.exclude_noise, pplot=False)
+        self.setWindowTitle('Done!')
+        
+        # plot P-wave and non-P-wave power spectral densities
+        self.fig.set_constrained_layout_pads(w_pad=0.05, h_pad=0.1)
+        grid = GridSpec(1, 2, width_ratios=[3,1], figure=self.fig)
+        ax1 = self.fig.add_subplot(grid[0])
+        yerr = ('ci',self.ci) if self.ci.isnumeric() else 'se' if self.ci=='sem' else self.ci
+        # create color palette for type(s) of P-waves analyzed
+        pal = {'no':'gray'}; order=['no', 'yes']
+        if self.p_iso and self.pcluster:
+            pal.update({'single':'dodgerblue', 'cluster':'darkblue'})
+            order = ['no', 'single', 'cluster']
+        elif not self.p_iso and not self.pcluster:
+            pal.update({'yes':'blue'})
+        else:
+            pal.update({'yes' : 'dodgerblue' if self.p_iso else 'darkblue'})
+        # plot PSDs
+        _ = sns.lineplot(data=df, x='Freq', y='Pow', hue='P-wave', errorbar=yerr, 
+                         linewidth=3, palette=pal, legend='auto', ax=ax1)
+        sns.despine()
+        ax1.set_xlabel('Freq (Hz)')
+        ylabel = 'Norm. power' if self.pnorm else 'Spectral density ($\mathrm{\mu V^2/Hz}$)'
+        ax1.set_ylabel(ylabel)
+        
+        # plot bar graph of high theta power
+        ax2 = self.fig.add_subplot(grid[1])
+        high_theta = [8,15]
+        itheta = np.where((df.Freq >= high_theta[0]) & (df.Freq <= high_theta[1]))[0]
+        df_theta = df.loc[itheta, ['Idf', 'Pow', 'P-wave']]
+        df_theta = df_theta.groupby(['Idf','P-wave']).sum().reset_index()
+        _ = sns.barplot(x='P-wave', y='Pow', data=df_theta, errorbar=yerr, 
+                        order=order, palette=pal, ax=ax2)
+        lines = sns.lineplot(x='P-wave', y='Pow', hue='Idf', data=df_theta, 
+                             errorbar=None, markersize=0, legend=False, ax=ax2)
+        _ = [l.set_color('black') for l in lines.get_lines()]
+        sns.despine()
+        ax2.set_xlabel('P-wave')
+        ax2.set_ylabel('')
+        ax2.set_title(f'{high_theta[0]}-{high_theta[1]} Hz')
+        
         self.canvas.draw()
         self.cleanup()
         

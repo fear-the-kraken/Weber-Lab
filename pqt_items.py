@@ -236,6 +236,22 @@ def update_noise_btn(top_parent, parent, icon):
     btn.setIconSize(QtCore.QSize(isize,isize))  # 28,18
     btn.setStyleSheet('QPushButton:checked {background-color : rgb(200,200,200)}')
     return btn
+
+class FreqBandLabel(pg.LabelItem):
+    def __init__(self, parent=None):
+        super(FreqBandLabel, self).__init__()
+        self.mainWin = parent
+        
+    def set_info(self, freq1, freq2, band_name='', color='white'):
+        
+        #name = f'{band_name}' if band_name else ''
+        txt = f'{freq1} - {freq2} Hz'
+        if band_name:
+            txt = band_name + ' (' + txt + ')'
+        labelOpts = {'color':color, 'size':'12pt'}
+        self.setText(txt, **labelOpts)
+        
+        
     
     
 class PlotButton(QtWidgets.QPushButton):
@@ -278,7 +294,7 @@ class PlotButton(QtWidgets.QPushButton):
             enable = False
         if 'hasDFF' in self.reqs and self.mainWin.hasDFF == False:
             enable = False
-        if 'recordPwaves' in self.reqs and self.mainWin.recordPwaves == False:
+        if 'recordPwaves' in self.reqs and self.mainWin.hasPwaves == False:
             enable = False
         if 'lsrTrigPwaves' in self.reqs and self.mainWin.lsrTrigPwaves == False:
             enable = False
