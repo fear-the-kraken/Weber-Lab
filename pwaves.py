@@ -2983,8 +2983,14 @@ def cross_correlate(dff, LFP, dn, iwin, ptrain, dffnorm=True):
     LFPdn = AS.downsample_vec(LFP, dn)
     if ptrain:  # restore P-wave train of 1's and 0's
         LFPdn = np.ceil(LFPdn).astype('int')
-        #norm = 1.
+        # For each timepoint relative to a P-wave, the correlation value is the sum
+        # of the DF/F values at each instance in the recording which fulfills that
+        # criteria (i.e. has a P-wave X seconds before or after). To normalize, divide
+        # each element in the correlation vector by the number of instances that were 
+        # summed to produce it; this puts the scale of the data back to original units
+        # of DF/F, or percent change from baseline
         norm = np.sum(LFPdn[0:-1])
+        #norm = 1.
     else:       # normalize raw LFP signal to zero mean
         LFPdn -= LFPdn.mean()
         norm = np.nanstd(dffdn) * np.nanstd(LFPdn)
@@ -3261,7 +3267,6 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
             sem_jtr = np.nanstd(CC_mx_jtr, axis=0) / np.sqrt(CC_mx_jtr.shape[0])
             ax1.plot(t, data_jtr, color='red')
             ax1.fill_between(t, data_jtr-sem_jtr, data_jtr+sem_jtr, color='red', alpha=0.5)
-        plt.show()
     if jitter:
         return [CC_mx, labels], [CC_mx_jtr, jlabels]
     else:
@@ -3273,7 +3278,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
                    vm=[], psmooth=0, dn=0, sf=0, mouse_avg='mouse', base_int=10,
                    baseline_start=0, baseline_end=-1, ma_thr=20, ma_state=3, 
                    flatten_is=False, tstart=0, tend=-1, jitter=0, use405=False, 
-                   ylim=[], ylim2=[], print_stats=True, pplot=True):
+                   show_win=False, ylim=[], ylim2=[], print_stats=True, pplot=True):
     """
     Get average DF/F signal surrounding P-waves in any brain state
     @Params
@@ -3322,6 +3327,8 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
         recordings = [recordings]
     if type(pzscore) not in [list, tuple]:
         pzscore = [pzscore, pzscore, pzscore]
+    if type(show_win) != list or len(show_win) != 2:
+        show_win = dff_win
     
     mice = dict()
     # get all unique mice
@@ -3401,25 +3408,38 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
         pwave_trig_z[idf] += dff_sep_z
         
     # create trial-averaged matrix for each normalization method
+    if show_win != dff_win:
+        swin1, swin2 = get_iwins(show_win, sr)
+        si, se = iwin1-swin1, -(iwin2-swin2)
+        zsize = swin1 + swin2
+    else:
+        zsize = iwin1 + iwin2
+        
     mx_pwave = mx2d(pwave_trig, 'trial', d1_size=(iwin1+iwin2))[0]        # trials x time bins
     mx_pwave_z1 = mx2d(pwave_trig_z, 'trial', d1_size=(iwin1+iwin2))[0]   # trials x time bins z-scored by recording
-    mx_pwave_z2 = np.zeros(mx_pwave.shape)                                # trials x time bins z-scored by collected window
+    mx_pwave_z2 = np.zeros((mx_pwave.shape[0], zsize))                    # trials x time bins z-scored by collected window
     for i in range(mx_pwave.shape[0]):
         d = mx_pwave[i,:]
-        mx_pwave_z2[i,:] = (d - d.mean()) / d.std()
+        dz = (d - d.mean()) / d.std()
+        if show_win != dff_win:
+            dz = dz[si:se]
+        mx_pwave_z2[i,:] = dz
     # create mouse-averaged matrix for each normalization method
     mx_pwave_ms, mice = mx2d(pwave_trig, 'mouse', d1_size=(iwin1+iwin2))       # mice x time bins
     mx_pwave_ms_z1, mice = mx2d(pwave_trig_z, 'mouse', d1_size=(iwin1+iwin2))  # mice x time bins z-scored by recording
-    mx_pwave_ms_z2 = np.zeros(mx_pwave_ms.shape)                               # mice x time bins z-scored by collected window
+    mx_pwave_ms_z2 = np.zeros((mx_pwave_ms.shape[0], zsize))                   # mice x time bins z-scored by collected window
     mx_dict = mx2d_dict(pwave_trig, 'mouse', d1_size=(iwin1+iwin2))  
     for row,m in enumerate(mice):
         # z-score each trial individually, then average across mice
-        ms_mx = np.zeros(mx_dict[m].shape)
+        ms_mx = np.zeros((mx_dict[m].shape[0], zsize))
         for i in range(mx_dict[m].shape[0]):
             d = mx_dict[m][i,:]
-            ms_mx[i,:] = (d - d.mean()) / d.std()
+            dz = (d - d.mean()) / d.std()
+            if show_win != dff_win:
+                dz = dz[si:se]
+            ms_mx[i,:] = dz
         mx_pwave_ms_z2[row,:] = np.nanmean(ms_mx, axis=0)
-    
+        
     # for each graph, collect the data matrix indicated by $pzscore 
     graph_mx = []
     for i,z in enumerate(pzscore):
@@ -3443,8 +3463,9 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
     if 't' in plotMode:  # timecourse of DF/F signal
         if print_stats:
             # stats: when does activity becomes significantly different from baseline?
+            win1, win2 = (-iwin1,iwin2) if show_win==dff_win else (-swin1,swin2)
             print('')
-            df=stats_timecourse(graph_mx[0], pre=-iwin1/sr, post=iwin2/sr, sr=sr, 
+            df=stats_timecourse(graph_mx[0], pre=win1/sr, post=win2/sr, sr=sr, 
                                 base_int=base_int, baseline_start=int(baseline_start*sr),
                                 baseline_end=int(baseline_end*sr) if baseline_end != -1 else -1,
                                 print_stats=print_stats)
@@ -3463,7 +3484,10 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
             # plot timecourse
             plt.figure()
             ax = plt.gca()
-            t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), len(data_mean))
+            if show_win == dff_win:
+                t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), len(data_mean))
+            else:
+                t = np.linspace(-np.abs(show_win[0]), np.abs(show_win[1]), len(data_mean))
             ax.plot(t, data_mean, color='black')
             ax.fill_between(t, data_mean-data_yerr, data_mean+data_yerr, color='black', alpha=0.3)
             if len(ylim) == 2:
@@ -3476,7 +3500,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
                 plt.title(f'STATE = {istate}; p_iso={p_iso}s;\nmouse_avg={mouse_avg}; pzscore={pzscore[0]}')
             else:
                 plt.title(f'STATE = {istate}; mouse_avg={mouse_avg}; pzscore={pzscore[0]}')
-            plt.show()
+            #plt.show()
             
     if 'h' in plotMode:  # heatmap of individual P-wave trials
         # smooth heatmap
@@ -3490,7 +3514,10 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
             # plot heatmap
             plt.figure()
             ax = plt.gca()
-            t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), graph_mx[1].shape[1])
+            if show_win == dff_win:
+                t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), graph_mx[1].shape[1])
+            else:
+                t = np.linspace(-np.abs(show_win[0]), np.abs(show_win[1]), graph_mx[1].shape[1])
             trial_no = np.arange(1, graph_mx[1].shape[0]+1)
             im = ax.pcolorfast(t, trial_no, graph_mx[1], cmap='bwr')
             if len(vm) == 2:
@@ -3504,12 +3531,15 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
                 plt.title(f'STATE = {istate}; p_iso={p_iso}s;\nmouse_avg={mouse_avg}; pzscore={pzscore[1]}')
             else:
                 plt.title(f'STATE = {istate}; mouse_avg={mouse_avg}; pzscore={pzscore[1]}')
-            plt.show()
+            #plt.show()
     
     if '0' in plotMode and pplot:  # bar graph of DF/F activity preceding vs following P-wave
         
         bar_win = 2  # number of seconds before and after P-wave to compare
-        t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), graph_mx[2].shape[1])
+        if show_win == dff_win:
+            t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), graph_mx[2].shape[1])
+        else:
+            t = np.linspace(-np.abs(show_win[0]), np.abs(show_win[1]), graph_mx[2].shape[1])
         # get idx of columns $bar_win seconds before and after P-wave
         pre_pidx = np.intersect1d(np.where(t>=(-bar_win))[0], np.where(t<0)[0])  
         post_pidx = np.intersect1d(np.where(t>=0)[0], np.where(t<=bar_win)[0])
@@ -3556,7 +3586,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
         print(f'###   Pre-P-wave vs post-P-wave ({bar_win} s, state={istate})')
         print(f'T={round(p.statistic,3)}, p-val={round(p.pvalue,5)}')
         print('')
-        plt.show()
+        #plt.show()
 
     return mice, graph_mx
 
@@ -3855,16 +3885,18 @@ def state_freq(ppath, recordings, istate, plotMode='0', tstart=0, tend=-1,
         # collect P-wave frequency and waveforms for each brain state
         for s in istate:
             sseq = sleepy.get_sequences(np.where(M==s)[0])
-            sseq = [seq for seq in sseq if seq[-1] >= istart and seq[0] <= iend]
             
             # if no instances of brain state, collect NaNs instead
-            if len(sseq) == 0:
+            if len(sseq[0]) == 0:
                 freq_mouse[s][rec].append(np.nan)
                 emp = np.empty((iwin1+iwin2,))
                 emp[:] = np.nan
                 waveform_mouse[s][rec].append([emp])
                 continue
-            
+            try:
+                sseq = [seq for seq in sseq if seq[-1] >= istart and seq[0] <= iend]
+            except:
+                pdb.set_trace()
             # get Intan indices for each state episode, exclude noise states if indicated
             state_idx = [np.arange(seq[0]*nbin, seq[-1]*nbin+nbin) for seq in sseq]
             if exclude_noise:
@@ -5511,7 +5543,7 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
     if plaser:
         for s in istate:
             # create single matrix (trials x time) of all trials
-            if 'trial' in mouse_avg:
+            if mouse_avg == 'trial':
                 lsr_p_wf_mx = mx2d(lsr_pwaves[s], d1_size = data_shape[0])[0]
                 spon_p_wf_mx = mx2d(spon_pwaves[s], d1_size = data_shape[0])[0]
                 success_lsr_wf_mx = mx2d(success_lsr[s], d1_size = data_shape[0])[0]
@@ -5580,14 +5612,21 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
                 ax1.set_ylim(ylim); ax2.set_ylim(ylim)
             else:
                 ax1.set_ylim(y); ax2.set_ylim(y)
-            plt.show()
+            #plt.show()
             
     if not plaser:
         for s in p_signal.keys():
-            # get dictionary of matrices (trials x time) for each recording or mouse
-            wf_avg = mx2d_dict(p_signal[s], mouse_avg, d1_size = data_shape[0])
-            # get single matrix (recording/mouse averages x time)
-            wf_mx = np.array(([np.nanmean(wf_avg[k], axis=0) for k in wf_avg.keys()]))
+            # create single matrix (trials x time) of all trials
+            if mouse_avg == 'trial':
+                wf_mx = mx2d(p_signal[s], d1_size = data_shape[0])[0]
+            # create dictionary of matrices (trials x time) for each recording or mouse
+            elif mouse_avg == 'recording' or mouse_avg == 'mouse':
+                wf_avg = mx2d_dict(p_signal[s], mouse_avg, d1_size = data_shape[0])
+                # get single matrix (recording/mouse averages x time)
+                wf_mx = np.array(([np.nanmean(wf_avg[k], axis=0) for k in wf_avg.keys()]))
+            else:
+                raise Exception(f'ERROR : "{mouse_avg}" is not a valid averaging method.')
+                
             # downsample signal
             if dn > 1:
                 wf_mx = AS.downsample_mx(wf_mx, int(dn), axis='x')
@@ -5607,7 +5646,7 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
             ax.set_title(f'State={s}, averaged by {mouse_avg}')
             if len(ylim) == 2:
                 ax.set_ylim(ylim)
-            plt.show()
+            #plt.show()
 
 def avg_SP(ppath, recordings, istate, win=[5,5], mode='pwaves', recalc_highres=False, 
            tstart=0, tend=-1, pnorm=1, pcalc=0, psmooth=[True,True], vm=[(0,5),(0,5)],
@@ -5815,7 +5854,7 @@ def avg_SP(ppath, recordings, istate, win=[5,5], mode='pwaves', recalc_highres=F
                 ax.set_ylabel('Freq (Hz)')
                 ax.set_title(f'SP surrounding P-waves ({states[s]})')
                 plt.colorbar(im, ax=ax, pad=0.0)
-            plt.show()
+            #plt.show()
             fig.suptitle('SPs averaged by ' + mouse_avg)
 
 def avg_band_power(ppath, recordings, istate, bands, band_labels=[], band_colors=[], win=[5,5], 

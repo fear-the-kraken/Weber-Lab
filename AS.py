@@ -343,11 +343,11 @@ def calculate_dff(ppath, name, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=Fa
     n = len(a465)
     
     # calculate fitted DF/F signal
-    dff = fit_dff(a65, a405, sr=sr, nskip=nskip, wcut=wcut, wcut405=wcut405,
+    dff = fit_dff(a465, a405, sr=sr, nskip=nskip, wcut=wcut, wcut405=wcut405,
                   perc=perc, shift_only=shift_only)
 
     # downsample DF/F signal to 2.5 s bins
-    nbins = int(np.round(SR)*2.5)
+    nbins = int(np.round(sr)*2.5)
     k = int(np.ceil((1.0 * n) / nbins))
     dff2 = np.zeros((k*nbins,))
     dff2[:len(dff)]=dff
@@ -946,7 +946,7 @@ def detect_emg_twitches(ppath, name, thres, thres_mode=1, min_dur=30, highres=Tr
 ###############            DATA ANALYSIS FUNCTIONS            ###############
 
 def dff_activity(ppath, recordings, istate, tstart=10, tend=-1, pzscore=False, 
-                 ma_thr=20, ma_state=3, flatten_is=False):
+                 ma_thr=20, ma_state=3, flatten_is=False, use405=False):
     """
     Plot average DF/F signal in each brain state
     @Params
@@ -957,6 +957,7 @@ def dff_activity(ppath, recordings, istate, tstart=10, tend=-1, pzscore=False,
     pzscore - if True, z-score DF/F signal by its mean across the recording
     ma_thr, ma_state - max duration and brain state for microarousals
     flatten_is - brain state for transition sleep
+    use405 - if True, analyze 'baseline' 405 signal instead of fluorescence signal
     @Returns
     df - dataframe with avg DF/F activity in each brain state for each mouse
     """
@@ -1009,10 +1010,20 @@ def dff_activity(ppath, recordings, istate, tstart=10, tend=-1, pzscore=False,
         
         # calculate DF/F signal using high cutoff frequency for 465 signal
         # and very low cutoff frequency for 405 signal
-        calculate_dff(ppath, rec, wcut=10, wcut405=2, shift_only=False)
-        
-        # load DF/F calcium signal
-        dff = so.loadmat(os.path.join(ppath, rec, 'DFF.mat'), squeeze_me=True)['dffd'][istart:iend]
+        if use405:
+            # load artifact control 405 signal
+            a405 = so.loadmat(os.path.join(ppath, rec, 'DFF.mat'), squeeze_me=True)['405']
+            isobestic = sleepy.my_lpfilter(a405, 2/(0.5*sr), N=4)
+            k = int(np.ceil((1.0 * len(isobestic)) / nbin))
+            tmp = np.zeros((k*nbin,))
+            tmp[:len(isobestic)] = isobestic
+            isobestic = tmp
+            dff = downsample_vec(isobestic, nbin)
+        else:
+            # load DF/F signal
+            calculate_dff(ppath, rec, wcut=10, wcut405=2, shift_only=False)
+            dff = so.loadmat(os.path.join(ppath, rec, 'DFF.mat'), squeeze_me=True)['dffd']
+        dff = dff[istart:iend]
         if pzscore:
             dff = (dff-dff.mean()) / dff.std()
         else:
@@ -1047,11 +1058,12 @@ def dff_activity(ppath, recordings, istate, tstart=10, tend=-1, pzscore=False,
     
     # plot signal in each state
     plt.figure()
-    sns.barplot(x='State', y='DFF', data=df, ci=68, palette={'REM':'cyan','Wake':'darkviolet',
-                                                             'NREM':'darkgray', 'IS':'darkblue'})
-    sns.pointplot(x='State', y='DFF', hue='Mouse', data=df, ci=None, markers='', color='black')
-    plt.gca().get_legend().remove()
-    plt.show()
+    ax = plt.gca()
+    pal = {'REM':'cyan','Wake':'darkviolet', 'NREM':'darkgray', 'IS':'darkblue'}
+    sns.barplot(x='State', y='DFF', data=df, errorbar='se', palette=pal, ax=ax)
+    lines = sns.lineplot(x='State', y='DFF', hue='Mouse', data=df, errorbar=None, 
+                         markersize=0, legend=False, ax=ax)
+    _ = [l.set_color('black') for l in lines.get_lines()]
     
     # stats
     res_anova = AnovaRM(data=df, depvar='DFF', subject='Mouse', within=['State']).fit()
