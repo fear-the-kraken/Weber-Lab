@@ -6,6 +6,7 @@ Custom widgets and functions used in main P-wave annotation window
 @author: fearthekraken
 """
 import numpy as np
+import matplotlib.colors as mcolors
 import pyautogui
 from PyQt5 import QtGui, QtCore, QtWidgets
 import pyqtgraph as pg
@@ -89,6 +90,9 @@ def warning_dlg(msg):
     """
     # create dialog box and yes/no buttons
     dlg = QtWidgets.QDialog()
+    font = QtGui.QFont()
+    font.setPointSize(12)
+    dlg.setFont(font)
     msg = QtWidgets.QLabel(msg)
     msg.setAlignment(QtCore.Qt.AlignCenter)
     QBtn = QtWidgets.QDialogButtonBox.Yes | QtWidgets.QDialogButtonBox.No
@@ -237,22 +241,147 @@ def update_noise_btn(top_parent, parent, icon):
     btn.setStyleSheet('QPushButton:checked {background-color : rgb(200,200,200)}')
     return btn
 
+
+class FreqBandWindow(QtWidgets.QDialog):
+    """
+    Pop-up window for setting frequency band name, range, and plotting color
+    """
+    def __init__(self):
+        super(FreqBandWindow, self).__init__()
+        wpx, hpx = pyautogui.size()
+        # get set of widths and heights, standardized by monitor dimensions
+        wspace5, wspace10, wspace15, wspace20 = [px_w(w, wpx) for w in [5,10,15,20]]
+        hspace5, hspace10, hspace15, hspace20 = [px_h(h, hpx) for h in [5,10,15,20]]
+        # set contents margins, central layout
+        self.setContentsMargins(wspace10,hspace10,wspace10,hspace10)
+        self.centralLayout = QtWidgets.QVBoxLayout(self)
+        font = QtGui.QFont()
+        font.setPointSize(12)
+        self.setFont(font)
+        
+        # band name
+        row1 = QtWidgets.QVBoxLayout()
+        row1.setSpacing(hspace10)
+        name_label = QtWidgets.QLabel('Band name')
+        name_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.name_input = QtWidgets.QLineEdit()
+        row1.addWidget(name_label)
+        row1.addWidget(self.name_input)
+        
+        # min and max frequencies
+        row2 = QtWidgets.QVBoxLayout()
+        row2.setSpacing(hspace10)
+        range_label = QtWidgets.QLabel('Frequency Range')
+        range_label.setAlignment(QtCore.Qt.AlignCenter)
+        freq_row = QtWidgets.QHBoxLayout()
+        freq_row.setSpacing(wspace5)
+        self.freq1_input = QtWidgets.QDoubleSpinBox()
+        self.freq1_input.setMaximum(500)
+        self.freq1_input.setDecimals(1)
+        self.freq1_input.setSingleStep(0.5)
+        self.freq1_input.setSuffix(' Hz')
+        self.freq1_input.valueChanged.connect(self.enable_save)
+        freq_dash = QtWidgets.QLabel('-')
+        self.freq2_input = QtWidgets.QDoubleSpinBox()
+        self.freq2_input.setMaximum(500)
+        self.freq2_input.setDecimals(1)
+        self.freq2_input.setSingleStep(0.5)
+        self.freq2_input.setSuffix(' Hz')
+        self.freq2_input.valueChanged.connect(self.enable_save)
+        freq_row.addWidget(self.freq1_input)
+        freq_row.addWidget(freq_dash)
+        freq_row.addWidget(self.freq2_input)
+        row2.addWidget(range_label)
+        row2.addLayout(freq_row)
+        
+        # plotting color
+        row3 = QtWidgets.QVBoxLayout()
+        row3.setSpacing(hspace5)
+        color_label = QtWidgets.QLabel('Color')
+        color_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.color_input = QtWidgets.QComboBox()
+        # get list of CSS colors sorted by name and hue
+        colors = mcolors.CSS4_COLORS
+        by_hsv = sorted((tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(color))),name) \
+                        for name,color in colors.items())
+        colornames = [name for hsv, name in by_hsv]
+        for cname in colornames:
+            pixmap = QtGui.QPixmap(100,100)
+            pixmap.fill(QtGui.QColor(cname))
+            self.color_input.addItem(QtGui.QIcon(pixmap), cname)
+        row3.addWidget(color_label)
+        row3.addWidget(self.color_input)
+        
+        # save or cancel changes
+        self.bbox = QtWidgets.QDialogButtonBox()
+        self.save_btn = self.bbox.addButton(QtWidgets.QDialogButtonBox.Save)
+        self.save_btn.setDisabled(True)
+        self.cancel_btn = self.bbox.addButton(QtWidgets.QDialogButtonBox.Cancel)
+        self.bbox.setCenterButtons(True)
+        self.bbox.accepted.connect(self.accept)
+        self.bbox.rejected.connect(self.reject)
+        
+        # add widgets
+        self.centralLayout.addLayout(row1)
+        self.centralLayout.addLayout(row2)
+        self.centralLayout.addLayout(row3)
+        self.centralLayout.addWidget(self.bbox)
+        self.centralLayout.setSpacing(hspace20)
+    
+    def enable_save(self):
+        """
+        Allow parameters to be saved if frequency range is valid
+        """
+        # max band frequency must be greater than min frequency
+        f1, f2 = self.freq1_input.value(), self.freq2_input.value()
+        self.save_btn.setEnabled(f2 > f1)
+        
+    
 class FreqBandLabel(pg.LabelItem):
+    """
+    Text label for currently plotted EEG frequency band power
+    """
     def __init__(self, parent=None):
         super(FreqBandLabel, self).__init__()
         self.mainWin = parent
         
-    def set_info(self, freq1, freq2, band_name='', color='white'):
+    def contextMenuEvent(self, event):
+        """
+        Set context menu to edit, delete, or add new frequency band
+        """
+        self.menu = QtWidgets.QMenu()
+        # edit freq band properties
+        editAction = QtWidgets.QAction('Edit band')
+        editAction.setObjectName('edit')
+        editAction.triggered.connect(self.mainWin.freq_band_window)
+        self.menu.addAction(editAction)
+        # delete freq band
+        deleteAction = QtWidgets.QAction('Delete band')
+        deleteAction.setObjectName('delete')
+        deleteAction.triggered.connect(self.mainWin.freq_band_window)
+        self.menu.addAction(deleteAction)
+        # add new freq band
+        addAction = QtWidgets.QAction('Add new band')
+        addAction.setObjectName('add')
+        addAction.triggered.connect(self.mainWin.freq_band_window)
+        self.menu.addAction(addAction)
+        self.menu.exec_(QtGui.QCursor.pos())
+            
         
-        #name = f'{band_name}' if band_name else ''
+    def set_info(self, freq1, freq2, band_name='', color='white'):
+        """
+        Update label of the current frequency band plot
+        @Params
+        freq1, freq2 - min and max frequencies in band
+        band_name - name of frequency band (e.g. delta, theta, sigma...)
+        color - color of band power plot
+        """
         txt = f'{freq1} - {freq2} Hz'
         if band_name:
             txt = band_name + ' (' + txt + ')'
         labelOpts = {'color':color, 'size':'12pt'}
         self.setText(txt, **labelOpts)
-        
-        
-    
+
     
 class PlotButton(QtWidgets.QPushButton):
     """
@@ -289,6 +418,9 @@ class PlotButton(QtWidgets.QPushButton):
     
     
     def enable_btn(self):
+        """
+        Enable button if recording has all required plot elements
+        """
         enable = True
         if 'hasEMG' in self.reqs and self.mainWin.hasEMG == False:
             enable = False
@@ -429,7 +561,7 @@ class HelpWindow(QtWidgets.QDialog):
         subheaderFont.setUnderline(True)
         keyFont = QtGui.QFont()
         keyFont.setFamily('Courier')
-        keyFont.setPointSize(15)
+        keyFont.setPointSize(18)
         keyFont.setBold(True)
         font = QtGui.QFont()
         font.setPointSize(12)
@@ -483,18 +615,18 @@ class HelpWindow(QtWidgets.QDialog):
         keytitle1 = QtWidgets.QLabel('Data Viewing')
         keytitle1.setAlignment(QtCore.Qt.AlignCenter)
         keytitle1.setFont(subheaderFont)
-        keydict1 = {'E' : 'show EEG / switch EEG channel',
-                    'M' : 'show EMG / switch EMG channel', 
-                    'L' : 'show LFP / switch LFP channel',
-                    'T' : 'show / hide threshold for P-wave detection',
-                    'P' : 'show / hide P-wave indices',
-                    'O' : 'show / hide opotogenetic laser train',
-                    'A' : 'show / hide EMG amplitude',
-                    'F' : 'show / hide P-wave frequency',
-                    'G' : 'show / hide GCaMP calcium signal',
-                    'U' : 'show / hide signal underlying P-wave threshold',
-                    'D' : 'show / hide standard deviation of LFP'}
-        # 'B' : 'show EEG band power / switch freq. band'  # in progress
+        keydict1 = {'e' : 'show EEG / switch EEG channel',
+                    'm' : 'show EMG / switch EMG channel', 
+                    'l' : 'show LFP / switch LFP channel',
+                    't' : 'show / hide threshold for P-wave detection',
+                    'p' : 'show / hide P-wave indices',
+                    'o' : 'show / hide opotogenetic laser train',
+                    'a' : 'show / hide EMG amplitude',
+                    'f' : 'show / hide P-wave frequency',
+                    'g' : 'show / hide GCaMP calcium signal',
+                    'u' : 'show / hide signal underlying P-wave threshold',
+                    'd' : 'show / hide standard deviation of LFP',
+                    'b' : 'show / toggle through EEG freq. bands (<b>B</b> to hide)'}
         for key,txt in keydict1.items():
             row = self.key_def_row(key, txt, spacing=wspace20, uline=True, 
                                    keyFont=keyFont, txtFont=font)
@@ -510,11 +642,11 @@ class HelpWindow(QtWidgets.QDialog):
         keytitle2 = QtWidgets.QLabel('Brain State Annotation')
         keytitle2.setAlignment(QtCore.Qt.AlignCenter)
         keytitle2.setFont(subheaderFont)
-        keydict2 = {'R' : 'REM sleep',
-                    'W' : 'wake', 
-                    'N' : 'non-REM sleep',
-                    'I' : 'intermediate (transition) sleep',
-                    'J' : 'failed transition sleep'}
+        keydict2 = {'r' : 'REM sleep',
+                    'w' : 'wake', 
+                    'n' : 'non-REM sleep',
+                    'i' : 'intermediate (transition) sleep',
+                    'j' : 'failed transition sleep'}
         for key,txt in keydict2.items():
             row = self.key_def_row(key, txt, spacing=wspace20, uline=True, 
                                    keyFont=keyFont, txtFont=font)
@@ -532,8 +664,8 @@ class HelpWindow(QtWidgets.QDialog):
         keytitle3.setFont(subheaderFont)
         keydict3 = {'9' : 'annotate waveform as P-wave', 
                     '0' : 'eliminate waveform as P-wave',
-                    'X' : 'annotate selected signal as noise',
-                    'C' : 'annotate selected signal as clean'}
+                    'x' : 'annotate selected signal as noise',
+                    'c' : 'annotate selected signal as clean'}
         for key,txt in keydict3.items():
             row = self.key_def_row(key, txt, spacing=wspace20, uline=False, 
                                    keyFont=keyFont, txtFont=font)
@@ -581,7 +713,7 @@ class HelpWindow(QtWidgets.QDialog):
                      '1' : 'seconds time scale',
                      '2' : 'minutes time scale',
                      '3' : 'hours time scale',
-                     'S' : 'save brain state annotation'}
+                     's' : 'save brain state annotation'}
         for j,(key,txt) in enumerate(keydict4b.items()):
             row = self.key_def_row(key, txt, uline=False, keyFont=keyFont, txtFont=font)
             # collect QLabel objects from row, manually insert into grid layout
@@ -622,7 +754,8 @@ class HelpWindow(QtWidgets.QDialog):
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(spacing)
         # create key label
-        k = QtWidgets.QLabel(key.upper())
+        #k = QtWidgets.QLabel(key.upper())
+        k = QtWidgets.QLabel(key)
         k.setAlignment(QtCore.Qt.AlignCenter)
         k.setFont(keyFont)
         # find and underline the first $key instance that begins a word in the $txt string
@@ -671,11 +804,8 @@ class GraphEEG(pg.PlotItem):
             # convert mouse click position to index in recording
             point = self.vb.mapSceneToView(event.pos()).x()
             point = np.round(point, np.abs(int(np.floor(np.log10(self.mainWin.dt)))))
-            i = np.where(self.mainWin.tseq == point)[0]
-            if i.size > 0:
-                idx = int(self.mainWin.tseq[int(i)] * self.mainWin.sr)
-            else:
-                return
+            i = np.abs(self.mainWin.tseq - point).argmin()
+            idx = int(self.mainWin.tseq[int(i)] * self.mainWin.sr)
             
             self.mainWin.show_arrowStart = True
             self.mainWin.show_arrowEnd = True
