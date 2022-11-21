@@ -15,7 +15,6 @@ import pyautogui
 import scipy.io as so
 import numpy as np
 import pandas as pd
-import matplotlib
 from PyQt5 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 import pdb
