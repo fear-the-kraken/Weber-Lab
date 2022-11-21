@@ -272,6 +272,7 @@ class FigureWindow(QtWidgets.QDialog):
             
             ### PLOT LAYOUT ###
             self.plotWidget = QtWidgets.QWidget()
+            self.plotWidget.setMinimumWidth(pqi.px_w(500, self.WIDTH))
             self.plotLayout = QtWidgets.QVBoxLayout(self.plotWidget)
             self.plotLayout.setContentsMargins(0,0,0,0)
             self.plotLayout.setSpacing(0)
@@ -2214,7 +2215,7 @@ class FigureWindow(QtWidgets.QDialog):
         self.tstart = int(self.tstart_val.value())
         self.tend = int(self.tend_val.value())
         
-        self.update_brainstate_params2()
+        #self.update_brainstate_params2()
     
     def update_brainstate_params2(self):
         """
@@ -3740,7 +3741,7 @@ class FigureWindow(QtWidgets.QDialog):
                                             sf=self.sf, mouse_avg=self.mouse_avg, 
                                             ma_thr=self.ma_thr, ma_state=self.ma_state, 
                                             flatten_is=self.flatten_is, tstart=self.tstart, 
-                                            tend=self.tend, print_stats=False, pplot=False)
+                                            tend=self.tend, print_stats=False, pplot=False, show_win=[1,1])
         self.setWindowTitle('Done!')
         
         self.fig.set_constrained_layout_pads(w_pad=0.05, h_pad=0.1)
@@ -3748,7 +3749,8 @@ class FigureWindow(QtWidgets.QDialog):
         # plot single-trial heatmap
         ax1 = self.fig.add_subplot(grid[0])
         hmap = graph_mx[1]
-        t = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), hmap.shape[1])
+        #t = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), hmap.shape[1])
+        t = np.linspace(-1, 1, hmap.shape[1])
         ntrial = np.arange(1, hmap.shape[0]+1)
         im = ax1.pcolorfast(t, ntrial, hmap, cmap='bwr')
         if len(self.dff_vm) == 2:
@@ -3758,7 +3760,8 @@ class FigureWindow(QtWidgets.QDialog):
         # plot averaged DF/F timecourse
         ax2 = self.fig.add_subplot(grid[1])
         mx = graph_mx[0]
-        t2 = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), mx.shape[1])
+        #t2 = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), mx.shape[1])
+        t2 = np.linspace(-1, 1, mx.shape[1])
         data = np.nanmean(mx, axis=0)
         yerr = np.nanstd(mx, axis=0)
         if self.ci=='sem':
@@ -3788,6 +3791,10 @@ class FigureWindow(QtWidgets.QDialog):
         data = dff[pi-iwin1 : pi+iwin2]
         if self.dff_z == 2:  # z-score DF/F by collected data window
             data = (data-data.mean()) / data.std()
+            swin1, swin2 = pwaves.get_iwins([1,1], self.mainWin.sr)
+            si, se = iwin1-swin1, -(iwin2-swin2)
+            zsize = swin1 + swin2
+            data = data[si:se]
         # downsample/smooth data
         if self.sf:
             data = AS.convolve_data(data, self.sf, axis='x')
@@ -3796,7 +3803,8 @@ class FigureWindow(QtWidgets.QDialog):
         
         # plot DF/F surrounding single P-wave
         self.fig.set_constrained_layout_pads(w_pad=0.4, h_pad=0.35)
-        x = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), len(data))
+        #x = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), len(data))
+        x = np.linspace(-1, 1, len(data))
         ax = self.fig.add_subplot(111)
         ax.plot(x, data, color='black', linewidth=5)
         ylab = '$\Delta$ F/F (z-scored)' if self.dff_z > 0 else '$\Delta$ F/F (%)'
