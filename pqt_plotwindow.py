@@ -76,15 +76,18 @@ class FigureWindow(QtWidgets.QDialog):
                                                                'fx':self.plot_lsr_pwave_stats, 'req_pwaves':True, 'time_res':'state',
                                                                'data_params':['ci']},
                                 'P-wave transitions'\
-                                    '(time-normalized)'  : {'widgets':['dataWidget', 'brstateWidget', 'pwaveWidget', 'spWidget'],
+                                    '(time-normalized)'     : {'widgets':['dataWidget', 'brstateWidget', 'pwaveWidget', 'spWidget'],
                                                                'fx':self.plot_stateseq, 'req_pwaves':True, 'time_res':'state',
                                                                'data_params':['mouse_avg', 'ci', 'sf']},
-                                'P-wave DF/F'               : {'widgets':['dataWidget', 'brstateWidget', 'pwaveWidget', 'dffWidget'],
+                                'P-wave \u0394F/F'          : {'widgets':['dataWidget', 'brstateWidget', 'pwaveWidget', 'dffWidget'],
                                                                'fx':self.plot_dff_pwaves, 'req_pwaves':True, 'time_res':'event',
                                                                'data_params':['win','mouse_avg','sf','ci']},
-                                'Single P-wave DF/F'        : {'widgets':['dataWidget', 'dffWidget'],
+                                'Single P-wave \u0394F/F'   : {'widgets':['dataWidget', 'dffWidget'],
                                                                'fx':self.plot_single_dff_pwave, 'req_pwaves':True, 'time_res':'event',
                                                                'data_params':['win','sf']},
+                                '\u0394F/F activity'        : {'widgets':['dataWidget', 'brstateWidget'],
+                                                               'fx':self.plot_dff_activity, 'req_pwaves':False, 'time_res':'state',
+                                                               'data_params':['mouse_avg','ci', 'zscore']},
                                 'Sleep timecourse'          : {'widgets':['sleepWidget', 'brstateWidget', 'pwaveWidget'], 
                                                                'fx':self.plot_sleep_timecourse, 'req_pwaves':False, 'time_res':'state',
                                                                'data_params':['mouse_avg', 'ci']},
@@ -134,7 +137,8 @@ class FigureWindow(QtWidgets.QDialog):
             self.twitch_avg = 'all'    # average EMG twitch freq by 'all' REM or 'each' REM period
             self.ci = 'sem'            # set confidence interval
             self.sf = 0                # set data smoothing factor
-            self.signal_type = 'LFP'   # signal type to plot
+            self.signal_type = 'LFP'   # set signal type (LFP/EMG/EEG/EEG2)
+            self.pzscore = 0           # set z-scoring method
             
             # brain state params
             self.ma_thr = 20     # max duration (s) for microarousals
@@ -207,8 +211,8 @@ class FigureWindow(QtWidgets.QDialog):
             self.twitchFile = []  # name of saved twitch info file
             
             # DF/F params
-            self.dff_dn = 500  # downsample DF/F signal by X bins
-            self.dff_z = 2     # z-scoring method for DF/F signal
+            self.dff_dn = 500  # downsample DFF signal by X bins
+            self.dff_z = 2     # z-scoring method for DFF signal
             self.dff_zwin = [-0.5,0.5]  # z-score by different time window than plot
             self.dff_psm = []  # smoothing factors for [x,y] axes of trial heatmap
             self.dff_vm = []   # saturation of trial heatmap
@@ -227,9 +231,9 @@ class FigureWindow(QtWidgets.QDialog):
             self.plotSettings = {}
         
         # adjust initial brainstate and data collection window for specific plots
-        REMplots = ['P-wave spectrogram', 'P-wave spectrum', 'P-wave DF/F', 'EMG twitches']
+        REMplots = ['P-wave spectrogram', 'P-wave spectrum', 'P-wave \u0394F/F', 'EMG twitches']
         self.istate = [1] if self.plotType in REMplots else [1,2,3,4]
-        if self.plotType == 'Single P-wave DF/F':
+        if self.plotType == 'Single P-wave \u0394F/F':
             self.dff_psm = []
             self.dff_vm = []
         
@@ -567,6 +571,21 @@ class FigureWindow(QtWidgets.QDialog):
             self.signalType.addItems(['LFP', 'EMG', 'EEG', 'EEG2'])
             c8.addWidget(signal_label)
             c8.addWidget(self.signalType)
+            # z-scoring method dropdown
+            c9_w = QtWidgets.QWidget()
+            c9_w.setMinimumWidth(pqi.px_w(90, self.WIDTH))
+            c9 = QtWidgets.QVBoxLayout(c9_w)
+            c9.setContentsMargins(0,0,0,0)
+            c9.setSpacing(hspace5)
+            z_label = QtWidgets.QLabel('Z-score')
+            z_label.setFont(font)
+            z_label.setAlignment(QtCore.Qt.AlignCenter)
+            self.z_type = QtWidgets.QComboBox()
+            self.z_type.setFont(font)
+            self.z_type.addItems(['None', 'Recording'])
+            c9.addWidget(z_label)
+            c9.addWidget(self.z_type)
+            
             # add widgets to layout
             lay2.addWidget(c1_w)
             lay2.addWidget(c2_w)
@@ -576,6 +595,7 @@ class FigureWindow(QtWidgets.QDialog):
             lay2.addWidget(c6_w)
             lay2.addWidget(c7_w)
             lay2.addWidget(c8_w)
+            lay2.addWidget(c9_w)
             # hide params not used in plot
             if 'win' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c1_w.hide()
@@ -593,6 +613,8 @@ class FigureWindow(QtWidgets.QDialog):
                 c7_w.hide()
             if 'signal' not in self.plotTypeWidgets[self.plotType]['data_params']:
                 c8_w.hide()
+            if 'zscore' not in self.plotTypeWidgets[self.plotType]['data_params']:
+                c9_w.hide()
             lay2.setSpacing(wspace10)
             line_2 = pqi.vline(orientation='h')
             self.dataLayout.addWidget(title2)
@@ -637,7 +659,7 @@ class FigureWindow(QtWidgets.QDialog):
                     btn.setDisabled(self.plotType == 'EMG twitches')
             self.state_btn_grp1.setExclusive(self.plotType in ['P-wave spectrogram',
                                                                'P-wave spectrum',
-                                                               'P-wave DF/F', 
+                                                               'P-wave \u0394F/F', 
                                                                'EMG twitches'])
             r1_b2w = QtWidgets.QFrame()
             r1_b2w.setFixedHeight(pqi.px_h(50, self.HEIGHT))
@@ -1152,8 +1174,17 @@ class FigureWindow(QtWidgets.QDialog):
                 self.spCalc_btn.setStyleSheet('color : gray')
                 self.spLoad_btn.setStyleSheet('color : gray')
                 spRecalc_label.setStyleSheet('color : gray')
-            # disable widgets for SP color saturation
+            # disable widgets for SP smoothing and color saturation
             if 'spectrum' in self.plotType:
+                self.spSmoothX_chk.setCheckable(False)
+                self.spSmoothX_chk.setStyleSheet('color : gray')
+                self.spSmoothX_val.setEnabled(False)
+                self.spSmoothX_val.lineEdit().setVisible(False)
+                self.spSmoothY_chk.setCheckable(False)
+                self.spSmoothY_chk.setStyleSheet('color : gray')
+                self.spSmoothY_val.setEnabled(False)
+                self.spSmoothY_val.lineEdit().setVisible(False)
+                spSmooth_label.setStyleSheet('color : gray')
                 self.spVmAuto_btn.setCheckable(False)
                 self.spVmCustom_btn.setCheckable(False)
                 self.spVmAuto_btn.setStyleSheet('color : gray')
@@ -1772,7 +1803,7 @@ class FigureWindow(QtWidgets.QDialog):
             c1.setSpacing(hspace5)
             c1r1 = QtWidgets.QVBoxLayout()
             c1r1.setSpacing(hspace1)
-            # downsample DF/F signal
+            # downsample DFF signal
             dffdn_label = QtWidgets.QLabel('Downsample')
             dffdn_label.setFont(font)
             dffdn_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1786,7 +1817,7 @@ class FigureWindow(QtWidgets.QDialog):
             c1r1.addWidget(self.dffdn_val, alignment=QtCore.Qt.AlignCenter)
             c1r2 = QtWidgets.QVBoxLayout()
             c1r2.setSpacing(hspace1)
-            # z-score DF/F signal
+            # z-score DFF signal
             dffz_label = QtWidgets.QLabel('Z-score')
             dffz_label.setFont(font)
             dffz_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1822,7 +1853,7 @@ class FigureWindow(QtWidgets.QDialog):
             c1r2.addLayout(dffzWin_hbox)
             c1.addLayout(c1r1)
             c1.addLayout(c1r2)
-            # DF/F trial map smoothing
+            # DFF trial map smoothing
             c2 = QtWidgets.QVBoxLayout()
             c2.setSpacing(hspace5)
             dffSm_label = QtWidgets.QLabel('Heat map\nsmoothing')
@@ -1832,7 +1863,7 @@ class FigureWindow(QtWidgets.QDialog):
             c2r2.setSpacing(0)
             self.dffSmX_chk =  QtWidgets.QCheckBox('X :')
             self.dffSmX_chk.setFont(font)
-            self.dffSmX_chk.setDisabled(self.plotType == 'Single P-wave DF/F')
+            self.dffSmX_chk.setDisabled(self.plotType == 'Single P-wave \u0394F/F')
             self.dffSmX_val = QtWidgets.QDoubleSpinBox()
             self.dffSmX_val.setFont(font)
             self.dffSmX_val.setMinimum(1)
@@ -1843,7 +1874,7 @@ class FigureWindow(QtWidgets.QDialog):
             c2r3.setSpacing(0)
             self.dffSmY_chk =  QtWidgets.QCheckBox('Y :')
             self.dffSmY_chk.setFont(font)
-            self.dffSmY_chk.setDisabled(self.plotType == 'Single P-wave DF/F')
+            self.dffSmY_chk.setDisabled(self.plotType == 'Single P-wave \u0394F/F')
             self.dffSmY_val = QtWidgets.QDoubleSpinBox()
             self.dffSmY_val.setFont(font)
             self.dffSmY_val.setMinimum(1)
@@ -1854,7 +1885,7 @@ class FigureWindow(QtWidgets.QDialog):
             c2.addLayout(c2r2)
             c2.addLayout(c2r3)
             c2.addSpacing(hspace10)
-            # DF/F trial map saturation
+            # DFF trial map saturation
             c3 = QtWidgets.QVBoxLayout()
             c3.setSpacing(hspace5)
             dffVm_label = QtWidgets.QLabel('Heat map\ncolor saturation')
@@ -1864,10 +1895,10 @@ class FigureWindow(QtWidgets.QDialog):
             c3r2.setSpacing(int(hspace5/2))
             self.dffVmAuto_btn = QtWidgets.QRadioButton('Auto')
             self.dffVmAuto_btn.setFont(font)
-            self.dffVmAuto_btn.setDisabled(self.plotType == 'Single P-wave DF/F')
+            self.dffVmAuto_btn.setDisabled(self.plotType == 'Single P-wave \u0394F/F')
             self.dffVmCustom_btn = QtWidgets.QRadioButton('Custom')
             self.dffVmCustom_btn.setFont(font)
-            self.dffVmCustom_btn.setDisabled(self.plotType == 'Single P-wave DF/F')
+            self.dffVmCustom_btn.setDisabled(self.plotType == 'Single P-wave \u0394F/F')
             c3r2.addWidget(self.dffVmAuto_btn)
             c3r2.addWidget(self.dffVmCustom_btn)
             c3r3 = QtWidgets.QHBoxLayout()
@@ -2165,14 +2196,17 @@ class FigureWindow(QtWidgets.QDialog):
         """
         Update general data collection and processing params from user input
         """
-        # update P-wave and laser window
+        # update data collection windows
         self.win = [round(self.preWin_val.value(),2), round(self.postWin_val.value(),2)]
         self.lsr_win = [float(self.preWinLsr_val.value()), float(self.postWinLsr_val.value())]
         self.excl_win = [float(self.preWinExcl_val.value()), float(self.postWinExcl_val.value())]
+        # update data averaging methods
         self.mouse_avg = self.dataAvg_type.currentText().lower()
         self.twitch_avg = self.twitchAvg_type.currentText().lower().split(' ')[0]
         self.ci = self.error_type.currentText().lower().replace('.','').split('%')[0]
+        # update smoothing/normalizing params
         self.sf = int(self.smooth_val.value())
+        self.pzscore = self.z_type.currentIndex()
         self.signal_type = self.signalType.currentText()
     
     
@@ -2248,13 +2282,12 @@ class FigureWindow(QtWidgets.QDialog):
         self.tstart = int(self.tstart_val.value())
         self.tend = int(self.tend_val.value())
         
-        #self.update_brainstate_params2()
     
     def update_brainstate_params2(self):
         """
         Adjust brain state params specifically for DF/F plots
         """
-        if self.plotType == 'P-wave DF/F':
+        if self.plotType == 'P-wave \u0394F/F':
             # if plotting single brain state, set state buttons to exclusive mode & uncheck all but REM
             # if plotting all states, disable exclusive mode & check all buttons
             self.state_btn_grp1.setExclusive(False)
@@ -2698,7 +2731,7 @@ class FigureWindow(QtWidgets.QDialog):
         """
         Update fiber photometry params from user input
         """
-        # update DF/F downsampling/z-scoring
+        # update DFF downsampling/z-scoring
         self.dff_dn = int(self.dffdn_val.value())
         self.dff_z = self.dffz_type.currentIndex()
         self.dff_zwin = [round(self.preZWin_val.value(),2), round(self.postZWin_val.value(),2)]
@@ -2706,7 +2739,7 @@ class FigureWindow(QtWidgets.QDialog):
         self.postZWin_val.setVisible(self.dff_z == 3) 
         self.zwin_dash.setVisible(self.dff_z == 3)
     
-        # update DF/F heatmap smoothing variables
+        # update DFF heatmap smoothing variables
         self.dffSmX_val.setEnabled(self.dffSmX_chk.isChecked())
         self.dffSmX_val.lineEdit().setVisible(self.dffSmX_chk.isChecked())
         self.dffSmY_val.setEnabled(self.dffSmY_chk.isChecked())
@@ -2720,7 +2753,7 @@ class FigureWindow(QtWidgets.QDialog):
         elif self.dffSmY_chk.isChecked():                                       # smooth across rows/trials only
             self.dff_psm = [int(self.dffSmY_val.value()), 1]
         
-        # update saturation for DF/F heatmap
+        # update saturation for DFF heatmap
         self.dffVmMin_val.setEnabled(self.dffVmCustom_btn.isChecked())
         self.dffVmMax_val.setEnabled(self.dffVmCustom_btn.isChecked())
         self.dffVmMin_val.lineEdit().setVisible(self.dffVmCustom_btn.isChecked())
@@ -2748,6 +2781,7 @@ class FigureWindow(QtWidgets.QDialog):
                  'ci' : str(self.ci),
                  'sf' : int(self.sf),
                  'signal_type' : str(self.signal_type),
+                 'pzscore' : int(self.pzscore),
                  'istate' : list(self.istate),
                  'sequence' : list(self.sequence),
                  'nstates' : list(self.nstates),
@@ -2838,6 +2872,7 @@ class FigureWindow(QtWidgets.QDialog):
         self.error_type.setCurrentIndex(j)
         self.smooth_val.setValue(ddict['sf'])
         self.signalType.setCurrentText(ddict['signal_type'])
+        self.z_type.setCurrentIndex(ddict['pzscore'])
         
         # set brainstate params
         for k,btn in self.plotStates.items():
@@ -3016,6 +3051,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.ci = ddict['ci']
             self.sf = ddict['sf']
             self.signal_type = ddict['signal_type']
+            self.pzscore = ddict['pzscore']
             self.istate = ddict['istate']
             self.sequence = ddict['sequence']
             self.nstates = ddict['nstates']
@@ -3714,7 +3750,7 @@ class FigureWindow(QtWidgets.QDialog):
         data_list = []  # [mice, timecourse mx, SP mx] for each dose
         self.setWindowTitle('Calculating time-normalized state transitions ...')
         for rec, dose in zip(rec_list, doses):
-            # get average P-wave frequency or DF/F signal for each recording list
+            # get average P-wave frequency or DFF signal for each recording list
             data = pwaves.stateseq(self.ppath, rec, self.sequence, 
                                    nstates=[int(n) for n in self.nstates], 
                                    state_thres=self.state_thres, sign=self.sign, 
@@ -3757,7 +3793,7 @@ class FigureWindow(QtWidgets.QDialog):
         ax2.set_xticks(x)
         ax2.set_xticklabels(x)
         ax2.set_xlabel('Time bins (normalized)')
-        ax2.set_ylabel('P-waves/s' if mode=='pwaves' else 'DF/F')
+        ax2.set_ylabel('P-waves/s' if mode=='pwaves' else '\u0394F/F')
         if len(doses)>1:
             ax2.legend()
         self.canvas.draw()
@@ -3774,7 +3810,7 @@ class FigureWindow(QtWidgets.QDialog):
         istate = 0 if self.plotAllStates_btn.isChecked() else self.istate[0]
         self.setWindowTitle('Calculating DF/F timecourse ...')
         
-        # get average DF/F signal 
+        # get average DFF signal 
         z_win = list(self.dff_zwin) if self.dff_z==3 else False
         ddict = pwaves.dff_timecourse(self.ppath, rec, istate, dff_win=self.win,
                                             pzscore=min([self.dff_z,2]), 
@@ -3803,7 +3839,7 @@ class FigureWindow(QtWidgets.QDialog):
         self.fig.colorbar(im, ax=ax1, pad=0.0)
         ax1.set_ylabel('Trial no.')
         
-        # plot averaged DF/F timecourse
+        # plot averaged DFF timecourse
         ax2 = self.fig.add_subplot(grid[1])
         tc_mx = pwaves.mx2d(ddict, mouse_avg=self.mouse_avg)[0]
         if self.sf:
@@ -3834,12 +3870,12 @@ class FigureWindow(QtWidgets.QDialog):
         pi = int(self.mainWin.curIdx)
         iwin1, iwin2 = pwaves.get_iwins(self.win, self.mainWin.sr)
         
-        # load DF/F, collect data window surrounding P-wave
+        # load DFF, collect data window surrounding P-wave
         dff = so.loadmat(os.path.join(self.ppath, self.name, 'DFF.mat'), squeeze_me=True)['dff']*100
-        if self.dff_z == 1:  # z-score DF/F by recording
+        if self.dff_z == 1:  # z-score DFF by recording
             dff = (dff-dff.mean()) / dff.std()
         data = dff[pi-iwin1 : pi+iwin2]
-        # z-score DF/F by local time window
+        # z-score DFF by local time window
         if self.dff_z == 2:
             data = (data - data.mean()) / data.std()
         elif self.dff_z == 3:
@@ -3853,7 +3889,7 @@ class FigureWindow(QtWidgets.QDialog):
         if self.dff_dn:
             data = AS.downsample_vec(data, self.dff_dn)
         
-        # plot DF/F surrounding single P-wave
+        # plot DFF surrounding single P-wave
         self.fig.set_constrained_layout_pads(w_pad=0.4, h_pad=0.35)
         x = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), len(data))
         ax = self.fig.add_subplot(111)
@@ -3861,6 +3897,37 @@ class FigureWindow(QtWidgets.QDialog):
         ylab = '$\Delta$ F/F (z-scored)' if self.dff_z > 0 else '$\Delta$ F/F (%)'
         ax.set_ylabel(ylab)
         ax.set_xlabel('Time (s)')
+        self.canvas.draw()
+        self.cleanup()
+    
+    
+    def plot_dff_activity(self):
+        self.fig.clear()
+        # get average DFF signal in each state
+        self.setWindowTitle('Calculating DF/F signal ... ')
+        rec = [self.name] if len(self.recordings)==0 else self.recordings[0]
+        
+        df = AS.dff_activity(self.ppath, rec, self.istate, tstart=self.tstart, 
+                             tend=self.tend, pzscore=self.pzscore, ma_thr=self.ma_thr, 
+                             ma_state=self.ma_state, flatten_is=self.flatten_is,
+                             mouse_avg=self.mouse_avg, pplot=False, print_stats=False)
+        self.setWindowTitle('Done!')
+    
+        # plot average DFF signal in each state
+        self.fig.set_constrained_layout_pads(w_pad=0.02, h_pad=0.02)
+        ax = self.fig.add_subplot(111)
+        pal = {'REM':'cyan', 'Wake':'darkviolet', 'NREM':'darkgray', 'IS':'darkblue', 
+               'IS-R':'navy', 'IS-W':'red', 'MA':'magenta'}
+        yerr = ('ci',int(self.ci)) if self.ci.isnumeric() else 'se' if self.ci=='sem' else self.ci
+        sns.barplot(data=df, x='state', y='dff', errorbar=yerr, palette=pal, ax=ax)
+        if self.mouse_avg in ['mouse','recording']:
+            lines = sns.lineplot(data=df, x='state', y='dff', hue=self.mouse_avg, 
+                                 errorbar=None, markersize=0, legend=False, ax=ax)
+            _ = [l.set_color('black') for l in lines.get_lines()]
+        sns.despine()
+        ax.set_xlabel('')
+        ylab = '$\Delta$ F/F (z-scored)' if self.pzscore else '$\Delta$ F/F (%)'
+        ax.set_ylabel(ylab)
         self.canvas.draw()
         self.cleanup()
     
@@ -4031,7 +4098,7 @@ class FigureWindow(QtWidgets.QDialog):
         for i,df in enumerate(dfs):
             # plot power spectrum(s)
             ax = self.fig.add_subplot(grid[i])
-            yerr = ('ci',self.ci) if self.ci.isnumeric() else 'se' if self.ci=='sem' else self.ci
+            yerr = ('ci',int(self.ci)) if self.ci.isnumeric() else 'se' if self.ci=='sem' else self.ci
                 
             sns.lineplot(data=df, x='Freq', y='Pow', hue='Lsr', errorbar=yerr, ax=ax, 
                          palette={'yes':'blue', 'no':'gray'}, legend='auto' if i==0 else False)
@@ -4070,7 +4137,7 @@ class FigureWindow(QtWidgets.QDialog):
         self.fig.set_constrained_layout_pads(w_pad=0.05, h_pad=0.1)
         grid = GridSpec(1, 2, width_ratios=[3,1], figure=self.fig)
         ax1 = self.fig.add_subplot(grid[0])
-        yerr = ('ci',self.ci) if self.ci.isnumeric() else 'se' if self.ci=='sem' else self.ci
+        yerr = ('ci',int(self.ci)) if self.ci.isnumeric() else 'se' if self.ci=='sem' else self.ci
         # create color palette for type(s) of P-waves analyzed
         pal = {'no':'gray'}; order=['no', 'yes']
         if self.p_iso and self.pcluster:
@@ -4081,7 +4148,7 @@ class FigureWindow(QtWidgets.QDialog):
         else:
             pal.update({'yes' : 'dodgerblue' if self.p_iso else 'darkblue'})
         # plot PSDs
-        _ = sns.lineplot(data=df, x='Freq', y='Pow', hue='P-wave', errorbar=yerr, 
+        _ = sns.lineplot(data=df, x='freq', y='pow', hue='pwave', errorbar=yerr, 
                          linewidth=3, palette=pal, legend='auto', ax=ax1)
         sns.despine()
         ax1.set_xlabel('Freq (Hz)')
@@ -4092,7 +4159,7 @@ class FigureWindow(QtWidgets.QDialog):
         ax2 = self.fig.add_subplot(grid[1])
         high_theta = [8,15]
         itheta = np.where((df.Freq >= high_theta[0]) & (df.Freq <= high_theta[1]))[0]
-        df_theta = df.loc[itheta, ['Idf', 'Pow', 'P-wave']]
+        df_theta = df.loc[itheta, ['idf', 'pow', 'pwave']]
         df_theta = df_theta.groupby(['Idf','P-wave']).sum().reset_index()
         _ = sns.barplot(x='P-wave', y='Pow', data=df_theta, errorbar=yerr, 
                         order=order, palette=pal, ax=ax2)
