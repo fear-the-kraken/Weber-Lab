@@ -3267,6 +3267,9 @@ elif len(params) == 1:
 else:
     ppath = params[0]
     name  = params[1]
+    
+ppath = '/home/fearthekraken/Documents/Data/photometry'
+name = 'Stefan_032519n2'
 
 app = QtWidgets.QApplication([])
 app.setStyle('Fusion')

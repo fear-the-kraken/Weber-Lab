@@ -208,7 +208,8 @@ class FigureWindow(QtWidgets.QDialog):
             
             # DF/F params
             self.dff_dn = 500  # downsample DF/F signal by X bins
-            self.dff_z = 2     # z-score DF/F signal
+            self.dff_z = 2     # z-scoring method for DF/F signal
+            self.dff_zwin = [-0.5,0.5]  # z-score by different time window than plot
             self.dff_psm = []  # smoothing factors for [x,y] axes of trial heatmap
             self.dff_vm = []   # saturation of trial heatmap
             
@@ -1757,16 +1758,16 @@ class FigureWindow(QtWidgets.QDialog):
                 
             ### DF/F parameters ###
             self.dffWidget = QtWidgets.QWidget()
-            self.dffWidget.setFixedHeight(pqi.px_h(155, self.HEIGHT))
+            self.dffWidget.setFixedHeight(pqi.px_h(170, self.HEIGHT))
             self.dffLayout = QtWidgets.QVBoxLayout(self.dffWidget)
-            self.dffLayout.setContentsMargins(wspace5,0,wspace5,cm)
-            self.dffLayout.setSpacing(hspace15)
+            self.dffLayout.setContentsMargins(wspace5,0,int(wspace5/2),cm)
+            self.dffLayout.setSpacing(hspace10)
             lay10 = QtWidgets.QHBoxLayout()
             lay10.setSpacing(wspace15)
-            title10 = QtWidgets.QLabel('DF/F Parameters')
+            title10 = QtWidgets.QLabel('\u0394F/F Parameters')
             title10.setAlignment(QtCore.Qt.AlignCenter)
             title10.setFixedHeight(titleHeight)
-            title10.setFont(subheaderFont)
+            title10.setFont(subheaderFont) 
             c1 = QtWidgets.QVBoxLayout()
             c1.setSpacing(hspace5)
             c1r1 = QtWidgets.QVBoxLayout()
@@ -1777,7 +1778,7 @@ class FigureWindow(QtWidgets.QDialog):
             dffdn_label.setAlignment(QtCore.Qt.AlignCenter)
             self.dffdn_val = QtWidgets.QDoubleSpinBox()
             self.dffdn_val.setFont(font)
-            self.dffdn_val.setFixedWidth(pqi.px_w(105, self.WIDTH))
+            self.dffdn_val.setFixedWidth(pqi.px_w(110, self.WIDTH))
             self.dffdn_val.setMaximum(10000)
             self.dffdn_val.setDecimals(0)
             self.dffdn_val.setSingleStep(50)
@@ -1791,16 +1792,40 @@ class FigureWindow(QtWidgets.QDialog):
             dffz_label.setAlignment(QtCore.Qt.AlignCenter)
             self.dffz_type = QtWidgets.QComboBox()
             self.dffz_type.setFont(font)
-            self.dffz_type.setFixedWidth(pqi.px_w(105, self.WIDTH))
-            self.dffz_type.addItems(['None', 'Recording', 'Time window'])
+            self.dffz_type.setFixedWidth(pqi.px_w(125, self.WIDTH))
+            self.dffz_type.addItems(['None', 'Recording', 'Time window', 'Custom window'])
+            dffzWin_hbox = QtWidgets.QHBoxLayout()
+            dffzWin_hbox.setSpacing(0)
+            dffzWin_hbox.setContentsMargins(0,0,0,0)
+            self.preZWin_val = QtWidgets.QDoubleSpinBox()
+            self.preZWin_val.setFont(font)
+            self.preZWin_val.setMinimum(-500)
+            self.preZWin_val.setMaximum(0)
+            self.preZWin_val.setDecimals(1)
+            self.preZWin_val.setSingleStep(0.1)
+            self.preZWin_val.setSuffix (' s')
+            self.zwin_dash = QtWidgets.QLabel(' - ')
+            self.zwin_dash.setFont(font)
+            self.zwin_dash.setAlignment(QtCore.Qt.AlignCenter)
+            self.postZWin_val = QtWidgets.QDoubleSpinBox()
+            self.postZWin_val.setFont(font)
+            self.postZWin_val.setMinimum(0)
+            self.postZWin_val.setMaximum(500)
+            self.postZWin_val.setDecimals(1)
+            self.postZWin_val.setSingleStep(0.1)
+            self.postZWin_val.setSuffix (' s')
+            dffzWin_hbox.addWidget(self.preZWin_val, stretch=2)
+            dffzWin_hbox.addWidget(self.zwin_dash, stretch=0)
+            dffzWin_hbox.addWidget(self.postZWin_val, stretch=2)
             c1r2.addWidget(dffz_label)
             c1r2.addWidget(self.dffz_type, alignment=QtCore.Qt.AlignCenter)
+            c1r2.addLayout(dffzWin_hbox)
             c1.addLayout(c1r1)
             c1.addLayout(c1r2)
             # DF/F trial map smoothing
             c2 = QtWidgets.QVBoxLayout()
             c2.setSpacing(hspace5)
-            dffSm_label = QtWidgets.QLabel('Heatmap smooth')
+            dffSm_label = QtWidgets.QLabel('Heat map\nsmoothing')
             dffSm_label.setFont(font)
             dffSm_label.setAlignment(QtCore.Qt.AlignCenter)
             c2r2 = QtWidgets.QHBoxLayout()
@@ -1828,14 +1853,15 @@ class FigureWindow(QtWidgets.QDialog):
             c2.addWidget(dffSm_label)
             c2.addLayout(c2r2)
             c2.addLayout(c2r3)
+            c2.addSpacing(hspace10)
             # DF/F trial map saturation
             c3 = QtWidgets.QVBoxLayout()
             c3.setSpacing(hspace5)
-            dffVm_label = QtWidgets.QLabel('Heatmap saturation')
+            dffVm_label = QtWidgets.QLabel('Heat map\ncolor saturation')
             dffVm_label.setFont(font)
             dffVm_label.setAlignment(QtCore.Qt.AlignCenter)
             c3r2 = QtWidgets.QHBoxLayout()
-            c3r2.setSpacing(hspace5)
+            c3r2.setSpacing(int(hspace5/2))
             self.dffVmAuto_btn = QtWidgets.QRadioButton('Auto')
             self.dffVmAuto_btn.setFont(font)
             self.dffVmAuto_btn.setDisabled(self.plotType == 'Single P-wave DF/F')
@@ -1861,6 +1887,7 @@ class FigureWindow(QtWidgets.QDialog):
             c3.addWidget(dffVm_label)
             c3.addLayout(c3r2)
             c3.addLayout(c3r3)
+            c3.addSpacing(hspace10)
             lay10.addLayout(c1)
             lay10.addLayout(c2)
             lay10.addLayout(c3)
@@ -1884,7 +1911,7 @@ class FigureWindow(QtWidgets.QDialog):
             # settings layout spacing
             self.settingsLayout.setContentsMargins(cm,cm,cm,0)
             self.settingsLayout.setSpacing(0)
-            self.settingsWidget.setFixedWidth(pqi.px_w(410, self.WIDTH))
+            self.settingsWidget.setFixedWidth(pqi.px_w(415, self.WIDTH))
             self.centralLayout.addWidget(self.settingsWidget)
             
         except Exception as e:
@@ -2006,6 +2033,8 @@ class FigureWindow(QtWidgets.QDialog):
         # update DF/F parameters
         self.dffdn_val.valueChanged.connect(self.update_dff_params)
         self.dffz_type.currentTextChanged.connect(self.update_dff_params)
+        self.preZWin_val.valueChanged.connect(self.update_dff_params)
+        self.postZWin_val.valueChanged.connect(self.update_dff_params)
         self.dffSmX_chk.toggled.connect(self.update_dff_params)
         self.dffSmX_val.valueChanged.connect(self.update_dff_params)
         self.dffSmY_chk.toggled.connect(self.update_dff_params)
@@ -2021,6 +2050,14 @@ class FigureWindow(QtWidgets.QDialog):
             print('Unable to connect plotting function')
         self.plotExp_btn.clicked.connect(self.plot_experiment)
         self.plotRec_btn.clicked.connect(self.plot_recording)
+    
+    
+    def resizeMe(self):
+        """
+        Adjust window height when showing/hiding widgets
+        """
+        self.adjustSize()
+        self.resize(self.minimumSizeHint())
         
         
     def disable_laser_widgets(self, disable):
@@ -2067,17 +2104,13 @@ class FigureWindow(QtWidgets.QDialog):
         """
         Update sleep timecourse params from user input
         """
-        def resizeMe():
-            self.adjustSize()
-            self.resize(self.minimumSizeHint())
-            
         # update plot statistic
         previous_stat = str(self.stat)
         self.stat = ['perc','freq','dur','is prob','pwave freq'][self.plotStat_type.currentIndex()]
         # show/hide P-wave widgets 
         self.plotTypeWidgets['Sleep timecourse']['req_pwaves'] = self.stat=='pwave freq'
         self.pwaveWidget.setVisible(self.stat == 'pwave freq')
-        QtCore.QTimer.singleShot(0, resizeMe)
+        QtCore.QTimer.singleShot(0, self.resizeMe)
             
         if self.binSize_btn.isChecked():
             # partition recording into time bins
@@ -2668,6 +2701,10 @@ class FigureWindow(QtWidgets.QDialog):
         # update DF/F downsampling/z-scoring
         self.dff_dn = int(self.dffdn_val.value())
         self.dff_z = self.dffz_type.currentIndex()
+        self.dff_zwin = [round(self.preZWin_val.value(),2), round(self.postZWin_val.value(),2)]
+        self.preZWin_val.setVisible(self.dff_z == 3)
+        self.postZWin_val.setVisible(self.dff_z == 3) 
+        self.zwin_dash.setVisible(self.dff_z == 3)
     
         # update DF/F heatmap smoothing variables
         self.dffSmX_val.setEnabled(self.dffSmX_chk.isChecked())
@@ -2764,6 +2801,7 @@ class FigureWindow(QtWidgets.QDialog):
                  'lsr_iso' : float(self.lsr_iso),
                  'dff_dn' : int(self.dff_dn),
                  'dff_z' : int(self.dff_z),
+                 'dff_zwin' : list(self.dff_zwin),
                  'dff_psm' : list(self.dff_psm),
                  'dff_vm' : list(self.dff_vm),
                  'rec' : [self.name] if len(self.recordings)==0 else self.recordings[0]}
@@ -2940,6 +2978,8 @@ class FigureWindow(QtWidgets.QDialog):
         # set DF/F params
         self.dffdn_val.setValue(ddict['dff_dn'])
         self.dffz_type.setCurrentIndex(ddict['dff_z'])
+        self.preZWin_val.setValue(ddict['dff_zwin'][0])
+        self.postZWin_val.setValue(ddict['dff_zwin'][1])
         if ddict['dff_psm']:
             self.dffSmX_chk.setChecked(False if ddict['dff_psm'][1]==1 else True)
             self.dffSmX_val.setValue(ddict['dff_psm'][1])
@@ -3029,6 +3069,7 @@ class FigureWindow(QtWidgets.QDialog):
             self.lsr_iso = ddict['lsr_iso']
             self.dff_dn = ddict['dff_dn']
             self.dff_z = ddict['dff_z']
+            self.dff_zwin = ddict['dff_zwin']
             self.dff_psm = ddict['dff_psm']
             self.dff_vm = ddict['dff_vm']
             return 1
@@ -3732,40 +3773,48 @@ class FigureWindow(QtWidgets.QDialog):
         # get P-waves during all states (0) or specified brain state (1-6)
         istate = 0 if self.plotAllStates_btn.isChecked() else self.istate[0]
         self.setWindowTitle('Calculating DF/F timecourse ...')
-        # get average DF/F signal
-        _, graph_mx = pwaves.dff_timecourse(self.ppath, rec, istate, dff_win=self.win,
-                                            plotMode='ht', pzscore=[self.dff_z]*3, 
-                                            p_iso=self.p_iso, pcluster=self.pcluster, 
-                                            clus_event=self.clus_event, vm=self.dff_vm,
-                                            psmooth=self.dff_psm, dn=self.dff_dn, 
-                                            sf=self.sf, mouse_avg=self.mouse_avg, 
+        
+        # get average DF/F signal 
+        z_win = list(self.dff_zwin) if self.dff_z==3 else False
+        ddict = pwaves.dff_timecourse(self.ppath, rec, istate, dff_win=self.win,
+                                            pzscore=min([self.dff_z,2]), 
+                                            z_win=z_win, p_iso=self.p_iso,
+                                            pcluster=self.pcluster, clus_event=self.clus_event,
+                                            vm=self.dff_vm, psmooth=self.dff_psm, 
+                                            dn=self.dff_dn, sf=self.sf, mouse_avg=self.mouse_avg, 
                                             ma_thr=self.ma_thr, ma_state=self.ma_state, 
                                             flatten_is=self.flatten_is, tstart=self.tstart, 
-                                            tend=self.tend, print_stats=False, pplot=False, show_win=[1,1])
+                                            tend=self.tend, print_stats=False, pplot=False)
         self.setWindowTitle('Done!')
-        
         self.fig.set_constrained_layout_pads(w_pad=0.05, h_pad=0.1)
         grid = GridSpec(2, 1, height_ratios=[2,1], figure=self.fig)
         # plot single-trial heatmap
         ax1 = self.fig.add_subplot(grid[0])
-        hmap = graph_mx[1]
-        #t = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), hmap.shape[1])
-        t = np.linspace(-1, 1, hmap.shape[1])
+        hmap = pwaves.mx2d(ddict, mouse_avg='trial')[0]
+        if self.dff_psm:
+            hmap = AS.convolve_data(hmap, self.dff_psm)
+        if self.dff_dn:
+            hmap = AS.downsample_mx(hmap, self.dff_dn, axis='x')
+        t = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), hmap.shape[1])
         ntrial = np.arange(1, hmap.shape[0]+1)
         im = ax1.pcolorfast(t, ntrial, hmap, cmap='bwr')
         if len(self.dff_vm) == 2:
             im.set_clim(self.dff_vm)
         self.fig.colorbar(im, ax=ax1, pad=0.0)
         ax1.set_ylabel('Trial no.')
+        
         # plot averaged DF/F timecourse
         ax2 = self.fig.add_subplot(grid[1])
-        mx = graph_mx[0]
-        #t2 = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), mx.shape[1])
-        t2 = np.linspace(-1, 1, mx.shape[1])
-        data = np.nanmean(mx, axis=0)
-        yerr = np.nanstd(mx, axis=0)
+        tc_mx = pwaves.mx2d(ddict, mouse_avg=self.mouse_avg)[0]
+        if self.sf:
+            tc_mx = AS.convolve_data(tc_mx, self.sf, axis='x')
+        if self.dff_dn:
+            tc_mx = AS.downsample_mx(tc_mx, self.dff_dn, axis='x')
+        data = np.nanmean(tc_mx, axis=0)
+        yerr = np.nanstd(tc_mx, axis=0)
         if self.ci=='sem':
-            yerr /= np.sqrt(mx.shape[0])
+            yerr /= np.sqrt(tc_mx.shape[0])
+        t2 = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), len(data))
         ax2.plot(t2, data, color='black')
         ax2.fill_between(t2, data-yerr, data+yerr, color='black', alpha=0.3)
         ylab = '$\Delta$ F/F (z-scored)' if self.dff_z > 0 else '$\Delta$ F/F (%)'
@@ -3784,17 +3833,20 @@ class FigureWindow(QtWidgets.QDialog):
         # get index of current P-wave
         pi = int(self.mainWin.curIdx)
         iwin1, iwin2 = pwaves.get_iwins(self.win, self.mainWin.sr)
+        
         # load DF/F, collect data window surrounding P-wave
         dff = so.loadmat(os.path.join(self.ppath, self.name, 'DFF.mat'), squeeze_me=True)['dff']*100
         if self.dff_z == 1:  # z-score DF/F by recording
             dff = (dff-dff.mean()) / dff.std()
         data = dff[pi-iwin1 : pi+iwin2]
-        if self.dff_z == 2:  # z-score DF/F by collected data window
-            data = (data-data.mean()) / data.std()
-            swin1, swin2 = pwaves.get_iwins([1,1], self.mainWin.sr)
-            si, se = iwin1-swin1, -(iwin2-swin2)
-            zsize = swin1 + swin2
-            data = data[si:se]
+        # z-score DF/F by local time window
+        if self.dff_z == 2:
+            data = (data - data.mean()) / data.std()
+        elif self.dff_z == 3:
+            zwin1, zwin2 = pwaves.get_iwins(self.dff_zwin, self.mainWin.sr)
+            zdata = dff[pi-zwin1 : pi+zwin2]
+            data = (data - zdata.mean()) / zdata.std()
+            
         # downsample/smooth data
         if self.sf:
             data = AS.convolve_data(data, self.sf, axis='x')
@@ -3803,8 +3855,7 @@ class FigureWindow(QtWidgets.QDialog):
         
         # plot DF/F surrounding single P-wave
         self.fig.set_constrained_layout_pads(w_pad=0.4, h_pad=0.35)
-        #x = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), len(data))
-        x = np.linspace(-1, 1, len(data))
+        x = np.linspace(-np.abs(self.win[0]), np.abs(self.win[1]), len(data))
         ax = self.fig.add_subplot(111)
         ax.plot(x, data, color='black', linewidth=5)
         ylab = '$\Delta$ F/F (z-scored)' if self.dff_z > 0 else '$\Delta$ F/F (%)'
@@ -4105,7 +4156,7 @@ class FigureWindow(QtWidgets.QDialog):
         if self.ci=='sem':
             yerr = [yerr[0] / np.sqrt(len(tw_freq)), None]
         x = [[1]]; width=0.4; colors=['cyan']
-        avgOver = 'each' if self.mouse_avg=='trials' else str(self.twitch_avg)
+        avgOver = 'each' if self.mouse_avg=='trial' else str(self.twitch_avg)
         pltTitle = 'each REM bout' if avgOver=='each' else 'all REM sleep'
         if len(dicts) > 1:
             tw_freq2, labels2 = pwaves.mx1d(dicts[1], mouse_avg=self.mouse_avg)

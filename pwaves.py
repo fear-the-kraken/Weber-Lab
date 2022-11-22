@@ -3274,11 +3274,12 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
 
 
 def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
-                   pzscore=[0,0,0], p_iso=0, pcluster=0, clus_event='waves', 
-                   vm=[], psmooth=0, dn=0, sf=0, mouse_avg='mouse', base_int=10,
-                   baseline_start=0, baseline_end=-1, ma_thr=20, ma_state=3, 
-                   flatten_is=False, tstart=0, tend=-1, jitter=0, use405=False, 
-                   show_win=False, ylim=[], ylim2=[], print_stats=True, pplot=True):
+                   pzscore=0, z_win=False, p_iso=0, pcluster=0, 
+                   clus_event='waves', vm=[], psmooth=0, dn=0, sf=0,
+                   mouse_avg='mouse', base_int=10, baseline_start=0, 
+                   baseline_end=-1, ma_thr=20, ma_state=3, flatten_is=False, 
+                   tstart=0, tend=-1, jitter=0, use405=False, ylim=[], ylim2=[], 
+                   print_stats=True, pplot=True):
     """
     Get average DF/F signal surrounding P-waves in any brain state
     @Params
@@ -3292,12 +3293,13 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
               '0' - bar plot of DF/F signal during 2 s preceding vs following P-waves
                   '1' = color-coded dots for mice; '2' = black dots for mice
                   '3' = color-coded lines for mice; '4' = black lines for mice
-    pzscore - 3-element list of data normalization methods for 1) timecourse graph
-                                                               2) heatmap
-                                                               3) bar graph
-                    0 - use raw DF/F values
-                    1 - z-score DF/F values by entire recording
-                    2 - z-score DF/F values within $dff_win time window
+    pzscore - normalization method for graphs
+               0 - use raw DF/F values
+               1 - z-score DF/F values by entire recording
+               2 - z-score DF/F values within $dff_win or $z_win time window
+    z_win - custom window for z-scoring and plotting DF/F signals on different time scales
+             * e.g. for dff_win=[-1,1] and z_win=[-10,10], values are z-scored by the 20 s
+               interval surrounding P-waves, but plot shows the 2 s surrounding interval
     p_iso, pcluster - inter-P-wave interval thresholds for detecting single and clustered P-waves
     clus_event - type of info to return for P-wave clusters
     vm, psmooth - control saturation and smoothing of trial heatmap
@@ -3316,33 +3318,23 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
     print_stats - if True, print stats summary
     pplot - if True, plot graphs
     @Returns
-    mice - list of mouse names
-    graph_mx - 3-element list containing DF/F matrix (mice/trials x time bins) for:
-                 1) timecourse plot/stats
-                 2) heatmap
-                 3) bar plot
+    ddict - data dictionary containing DF/F signals surrounding each P-wave
+            (keys=recordings, values=lists of timecourses)
     """
-    
+    # clean data inputs
     if type(recordings) != list:
         recordings = [recordings]
-    if type(pzscore) not in [list, tuple]:
-        pzscore = [pzscore, pzscore, pzscore]
-    if type(show_win) != list or len(show_win) != 2:
-        show_win = dff_win
+    if type(pzscore) in [list, tuple]:
+        if len(set(pzscore)) > 1:
+            print(f'### WARNING - {pzscore[0]} used as z-scoring method for all graphs')
+        pzscore = pzscore[0]
+    if pzscore != 2 or type(z_win) not in [list, tuple] or len(z_win) != 2:
+        z_win = dff_win
     
-    mice = dict()
-    # get all unique mice
-    for rec in recordings:
-        idf = re.split('_', rec)[0]
-        if not idf in mice:
-            mice[idf] = 1
-    mice = list(mice.keys())
-        
-    pwave_trig = {m:[] for m in mice}    # raw DF/F values
-    pwave_trig_z = {m:[] for m in mice}  # DF/F values z-scored by recording
+    pwave_trig = {rec:[] for rec in recordings}
     
     for rec in recordings:
-        #print('Getting data for ' + rec + ' ...')
+        print('Getting data for ' + rec + ' ...')
         idf = re.split('_', rec) [0]
         
         # load sampling rate
@@ -3350,6 +3342,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
         nbin = int(np.round(sr) * 2.5)
         dt = (1.0 / sr) * nbin
         iwin1, iwin2 = get_iwins(dff_win, sr)
+        zwin1, zwin2 = get_iwins(z_win, sr)
         
         # calculate DF/F signal using high cutoff frequency for 465 signal
         # and very low cutoff frequency for 405 signal
@@ -3385,87 +3378,63 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
             np.random.seed(0)
             jter = np.random.randint(-jitter*sr, jitter*sr, len(idx))
             idx = idx + jter
-            idx = [i for i in idx if i >= iwin1 and i < len(LFP)-iwin2]
 
-        # if istate is an integer, find all P-wave indices in that state
+        # if $istate is an integer, find all P-wave indices in that state
         if not isinstance(istate, str):
             if istate != 0:
-                state_p_idx = [i for i in idx if int(i/nbin) < len(M) and  M[int(i/nbin)] == istate]
+                idx_dn = np.floor(idx/nbin).astype('int')
+                idx_dn_state = np.intersect1d(idx_dn, np.where(M==istate)[0])
+                iidx = np.nonzero(np.in1d(idx_dn, idx_dn_state))[0]
+                p_idx = idx[iidx]
             else:
-                state_p_idx = idx
+                p_idx = idx
+                
         # define start and end points of analysis
         istart = int(np.round(tstart*sr))
         iend = len(LFP)-1 if tend==-1 else int(np.round(tend*sr))
+        z1, z2 = max([iwin1,zwin1]), max([iwin2,zwin2])
+        w1, w2 = max(istart, z1), min(iend, len(dff)-z2)
+        p_idx = p_idx[np.where((p_idx >= w1) & (p_idx < w2))[0]]
         
-        # collect raw and z-scored DF/F signal surrounding P-waves
-        dff_sep = []
-        dff_sep_z = []
-        for i in state_p_idx:
-            if i>=np.abs(iwin1) and i+iwin2<len(dff) and i>=istart and i<=iend:
-                dff_sep.append(dff[i-iwin1:i+iwin2])
-                dff_sep_z.append(dff_z[i-iwin1:i+iwin2])
-        pwave_trig[idf] += dff_sep
-        pwave_trig_z[idf] += dff_sep_z
-        
-    # create trial-averaged matrix for each normalization method
-    if show_win != dff_win:
-        swin1, swin2 = get_iwins(show_win, sr)
-        si, se = iwin1-swin1, -(iwin2-swin2)
-        zsize = swin1 + swin2
-    else:
-        zsize = iwin1 + iwin2
-        
-    mx_pwave = mx2d(pwave_trig, 'trial', d1_size=(iwin1+iwin2))[0]        # trials x time bins
-    mx_pwave_z1 = mx2d(pwave_trig_z, 'trial', d1_size=(iwin1+iwin2))[0]   # trials x time bins z-scored by recording
-    mx_pwave_z2 = np.zeros((mx_pwave.shape[0], zsize))                    # trials x time bins z-scored by collected window
-    for i in range(mx_pwave.shape[0]):
-        d = mx_pwave[i,:]
-        dz = (d - d.mean()) / d.std()
-        if show_win != dff_win:
-            dz = dz[si:se]
-        mx_pwave_z2[i,:] = dz
-    # create mouse-averaged matrix for each normalization method
-    mx_pwave_ms, mice = mx2d(pwave_trig, 'mouse', d1_size=(iwin1+iwin2))       # mice x time bins
-    mx_pwave_ms_z1, mice = mx2d(pwave_trig_z, 'mouse', d1_size=(iwin1+iwin2))  # mice x time bins z-scored by recording
-    mx_pwave_ms_z2 = np.zeros((mx_pwave_ms.shape[0], zsize))                   # mice x time bins z-scored by collected window
-    mx_dict = mx2d_dict(pwave_trig, 'mouse', d1_size=(iwin1+iwin2))  
-    for row,m in enumerate(mice):
-        # z-score each trial individually, then average across mice
-        ms_mx = np.zeros((mx_dict[m].shape[0], zsize))
-        for i in range(mx_dict[m].shape[0]):
-            d = mx_dict[m][i,:]
-            dz = (d - d.mean()) / d.std()
-            if show_win != dff_win:
-                dz = dz[si:se]
-            ms_mx[i,:] = dz
-        mx_pwave_ms_z2[row,:] = np.nanmean(ms_mx, axis=0)
-        
-    # for each graph, collect the data matrix indicated by $pzscore 
-    graph_mx = []
-    for i,z in enumerate(pzscore):
-        if 'trial' in mouse_avg or i==1:  # heatmap always uses single trials
-            if z == 0:
-                graph_mx.append(mx_pwave)
-            elif z == 1:
-                graph_mx.append(mx_pwave_z1)
-            elif z == 2:
-                graph_mx.append(mx_pwave_z2)
-        elif mouse_avg == 'mouse':
-            if z == 0:
-                graph_mx.append(mx_pwave_ms)
-            elif z == 1:
-                graph_mx.append(mx_pwave_ms_z1)
-            elif z == 2:
-                graph_mx.append(mx_pwave_ms_z2)
-            
+        # collect DF/F signal surrounding each P-wave
+        dff_rec = []
+        for pi in p_idx:
+            if pzscore == 2:
+                zdata = dff[pi-zwin1 : pi+zwin2]
+                data = (dff[pi-iwin1 : pi+iwin2] - zdata.mean()) / zdata.std()
+            elif pzscore == 1:
+                data = dff_z[pi-iwin1 : pi+iwin2]
+            elif pzscore == 0:
+                data = dff[pi-iwin1 : pi+iwin2]
+            dff_rec.append(data)
+        pwave_trig[rec] = dff_rec
+    
+    # create descriptive title
+    title1 = f'STATE = {istate}'
+    if p_iso:
+        title1 += f'; p_iso={p_iso} s'
+    elif pcluster:
+        title1 += f'; pcluster={pcluster} s, cluster event={clus_event}'
+    title2 = f'\nmouse avg={mouse_avg}'
+    if pzscore == 1:
+        title2 += '; z-scored by recording'
+    elif pzscore == 2:
+        if dff_win == z_win:
+            title2 += '; z-scored by time window'
+        else:
+            title2 += f'; z-scored by {-np.abs(z_win[0])} to +{np.abs(z_win[1])} s window'
+    title = title1 + title2
+    ylabel = '$\Delta$ F/F (%)' if pzscore==0 else '$\Delta$ F/F (z-scored)'
     
     ###   GRAPHS   ###
     if 't' in plotMode:  # timecourse of DF/F signal
+        # get matrix of subjects (trials/recordings/mice) x time bins
+        mx = mx2d(pwave_trig, mouse_avg, d1_size=(iwin1+iwin2))[0]
+    
         if print_stats:
             # stats: when does activity becomes significantly different from baseline?
-            win1, win2 = (-iwin1,iwin2) if show_win==dff_win else (-swin1,swin2)
             print('')
-            df=stats_timecourse(graph_mx[0], pre=win1/sr, post=win2/sr, sr=sr, 
+            stat_df=stats_timecourse(mx, pre=-iwin1/sr, post=iwin2/sr, sr=sr, 
                                 base_int=base_int, baseline_start=int(baseline_start*sr),
                                 baseline_end=int(baseline_end*sr) if baseline_end != -1 else -1,
                                 print_stats=print_stats)
@@ -3473,122 +3442,100 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
         
         # smooth/downsample along time dimension
         if sf:
-            graph_mx[0] = AS.convolve_data(graph_mx[0], sf, axis='x')
+            mx = AS.convolve_data(mx, sf, axis='x')
         if dn:
-            graph_mx[0] = AS.downsample_mx(graph_mx[0], dn, axis='x')
+            mx = AS.downsample_mx(mx, dn, axis='x')
         
         if pplot:
-            data_mean = np.nanmean(graph_mx[0], axis=0)
-            data_yerr = np.nanstd(graph_mx[0], axis=0) / np.sqrt(graph_mx[0].shape[0])
-            
             # plot timecourse
+            data_mean = np.nanmean(mx, axis=0)
+            data_yerr = np.nanstd(mx, axis=0) / np.sqrt(mx.shape[0])
             plt.figure()
             ax = plt.gca()
-            if show_win == dff_win:
-                t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), len(data_mean))
-            else:
-                t = np.linspace(-np.abs(show_win[0]), np.abs(show_win[1]), len(data_mean))
+            t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), len(data_mean))
             ax.plot(t, data_mean, color='black')
-            ax.fill_between(t, data_mean-data_yerr, data_mean+data_yerr, color='black', alpha=0.3)
+            ax.fill_between(t, data_mean-data_yerr, data_mean+data_yerr, 
+                            color='black', alpha=0.3)
             if len(ylim) == 2:
                 ax.set_ylim(ylim)
-            [ax.set_ylabel('$\Delta$ F/F (z-scored)') if pzscore[0] else ax.set_ylabel('$\Delta$ F/F (%)')]
             ax.set_xlabel('Time (s)')
-            if pcluster:
-                plt.title(f'STATE = {istate}; pcluster={pcluster}s; cluster_event={clus_event}\nmouse_avg={mouse_avg}; pzscore={pzscore[0]}')
-            elif p_iso:
-                plt.title(f'STATE = {istate}; p_iso={p_iso}s;\nmouse_avg={mouse_avg}; pzscore={pzscore[0]}')
-            else:
-                plt.title(f'STATE = {istate}; mouse_avg={mouse_avg}; pzscore={pzscore[0]}')
-            #plt.show()
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
             
     if 'h' in plotMode:  # heatmap of individual P-wave trials
+        mx2 = mx2d(pwave_trig, 'trial', d1_size=(iwin1+iwin2))[0]
         # smooth heatmap
         if psmooth:
-            graph_mx[1] = AS.convolve_data(graph_mx[1], psmooth)
+            mx2 = AS.convolve_data(mx2, psmooth)
         # downsample along time dimension
         if dn:
-            graph_mx[1] = AS.downsample_mx(graph_mx[1], dn, axis='x')
+            mx2 = AS.downsample_mx(mx2, dn, axis='x')
         
         if pplot:
             # plot heatmap
             plt.figure()
             ax = plt.gca()
-            if show_win == dff_win:
-                t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), graph_mx[1].shape[1])
-            else:
-                t = np.linspace(-np.abs(show_win[0]), np.abs(show_win[1]), graph_mx[1].shape[1])
-            trial_no = np.arange(1, graph_mx[1].shape[0]+1)
-            im = ax.pcolorfast(t, trial_no, graph_mx[1], cmap='bwr')
+            t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), mx2.shape[1])
+            trial_no = np.arange(1, mx2.shape[0]+1)
+            im = ax.pcolorfast(t, trial_no, mx2, cmap='bwr')
             if len(vm) == 2:
                 im.set_clim(vm)
             plt.colorbar(im, ax=ax, pad=0.0)
             ax.set_ylabel('Trial no.')
             ax.set_xlabel('Time (s)')
-            if pcluster:
-                plt.title(f'STATE = {istate}; pcluster={pcluster}s; cluster_event={clus_event}s\nmouse_avg={mouse_avg}; pzscore={pzscore[1]}')
-            elif p_iso:
-                plt.title(f'STATE = {istate}; p_iso={p_iso}s;\nmouse_avg={mouse_avg}; pzscore={pzscore[1]}')
-            else:
-                plt.title(f'STATE = {istate}; mouse_avg={mouse_avg}; pzscore={pzscore[1]}')
-            #plt.show()
+            ax.set_title(title)
     
     if '0' in plotMode and pplot:  # bar graph of DF/F activity preceding vs following P-wave
-        
+        t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), iwin1+iwin2)
         bar_win = 2  # number of seconds before and after P-wave to compare
-        if show_win == dff_win:
-            t = np.linspace(-np.abs(dff_win[0]), np.abs(dff_win[1]), graph_mx[2].shape[1])
-        else:
-            t = np.linspace(-np.abs(show_win[0]), np.abs(show_win[1]), graph_mx[2].shape[1])
-        # get idx of columns $bar_win seconds before and after P-wave
-        pre_pidx = np.intersect1d(np.where(t>=(-bar_win))[0], np.where(t<0)[0])  
-        post_pidx = np.intersect1d(np.where(t>=0)[0], np.where(t<=bar_win)[0])
-        pre_p = graph_mx[2][:,pre_pidx].mean(axis=1)
-        post_p = graph_mx[2][:,post_pidx].mean(axis=1)
+        ipre = np.where((t>=(-bar_win)) & (t<0))[0]
+        ipost = np.where((t>=0) & (t<=bar_win))[0]
+        # create dataframe with average pre and post-P-wave DF/F values
+        rec_dict = mx2d_dict(pwave_trig, 'recording', d1_size=iwin1+iwin2)
+        df = pd.DataFrame(columns=['mouse', 'recording', 'state', 'group', 'dff'])
+        for rec in recordings:
+            idf = rec.split('_')[0]
+            ppre, ppost = [rec_dict[rec][:,ii].mean(axis=1) for ii in [ipre,ipost]]
+            df = pd.concat([df, pd.DataFrame({'mouse':idf,
+                                              'recording':rec,
+                                              'state':istate,
+                                              'group':np.repeat(['pre','post'], len(ppre)),
+                                              'dff':np.concatenate((ppre,ppost))})],
+                           axis=0, ignore_index=True)
         
         # plot bar graph
         plt.figure()
-        plt.bar(['pre', 'post'], [pre_p.mean(), post_p.mean()], 
-                yerr=[pre_p.std()/np.sqrt(len(pre_p)), post_p.std()/np.sqrt(len(post_p))], 
-                color=['gray', 'blue'])
-        
-        if mouse_avg == 'mouse':
-            # set colors for plotting
-            mcs = {}
-            for m in mice:
-                mcs.update(AS.colorcode_mice(m))
-            for midx, mname in enumerate(mice):
-                points = [pre_p[midx], post_p[midx]]
-                
-                if '1' in plotMode: markercolor = 'black'
-                elif '2' in plotMode: markercolor = mcs[mname]
-                if '3' in plotMode: linecolor = 'black'
-                elif '4' in plotMode: linecolor = mcs[mname]
-                
-                if '1' in plotMode or '2' in plotMode:
-                    plt.plot(['pre', 'post'], points, color=markercolor, marker='o', 
-                             ms=7, markeredgewidth=1, linewidth=0, markeredgecolor='black', 
-                             label=mname, clip_on=False)[0]
-                if '3' in plotMode or '4' in plotMode:
-                    plt.plot(['pre', 'post'], points, color=linecolor, linewidth=2, label=mname)
-        if len(ylim2) == 2:
-            plt.ylim(ylim2)
-        if pcluster:
-            plt.title(f'STATE = {istate}; pcluster={pcluster}s; cluster_event={clus_event}s\nmouse_avg={mouse_avg}; pzscore={pzscore[2]}; win={bar_win} s')
-        elif p_iso:
-            plt.title(f'STATE = {istate}; p_iso={p_iso}s;\nmouse_avg={mouse_avg}; pzscore={pzscore[2]}; win={bar_win} s')
+        ax = plt.gca()
+        if mouse_avg in ['mouse', 'recording']:
+            # plot each mouse/recording individually
+            df2 = df.groupby([mouse_avg, 'group']).sum().reset_index()
+            df2.sort_values(['mouse','group'], ascending=[True,False], ignore_index=True, inplace=True)
+            sns.barplot(data=df2, x='group', y='dff', palette=['lightgray','darkgray'], 
+                        errorbar='se', ax=ax)
+            lines = sns.lineplot(data=df2, x='group', y='dff', hue=mouse_avg, 
+                                 linewidth=2, legend=False, ax=ax)
+            _ = [l.set_color('black') for l in lines.get_lines()]
+            # paired t-test
+            p = scipy.stats.ttest_rel(np.array(df2.dff[np.where(df2.group=='pre')[0]]),
+                                      np.array(df2.dff[np.where(df2.group=='post')[0]]))
+            ttype = 'paired'
         else:
-            plt.title(f'STATE = {istate}; mouse_avg={mouse_avg}; pzscore={pzscore[2]}; win={bar_win} s')
+            # plot all P-wave trials together
+            sns.barplot(data=df, x='group', y='dff', palette=['lightgray','darkgray'], 
+                        errorbar='se', ax=ax)
+            # unpaired t-test
+            p = scipy.stats.ttest_ind(np.array(df.dff[np.where(df.group=='pre')[0]]),
+                                      np.array(df.dff[np.where(df.group=='post')[0]]))
+            ttype = 'unpaired'
+        ax.set_ylabel(ylabel)
+        ax.set_title(title + f'\nvalues averaged over {bar_win} s pre/post P-wave')
         
-        # bar graph stats
-        p = scipy.stats.ttest_rel(pre_p, post_p)
+        # print stats
         print('')
-        print(f'###   Pre-P-wave vs post-P-wave ({bar_win} s, state={istate})')
+        print(f'###   Pre-P-wave vs post-P-wave ({bar_win} s, state={istate}, {ttype} t-test)')
         print(f'T={round(p.statistic,3)}, p-val={round(p.pvalue,5)}')
         print('')
-        #plt.show()
-
-    return mice, graph_mx
+    return pwave_trig
 
 
 def spectralfield_highres(ppath, name, pre, post, istate=[1], theta=[1,10,100,1000,10000], pnorm=1,
