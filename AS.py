@@ -1953,18 +1953,15 @@ def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1
     print('p = ' + str(float(res_anova.anova_table['Pr > F'])))
     print(''); print(mc[0])
     
-def state_online_analysis(ppath, recordings, istate=1, plotMode='0', single_mode=False, 
-                        overlap=0, ma_thr=20, ma_state=3, flatten_is=False, ylim=[], print_stats=True):
+def state_online_analysis(ppath, recordings, istate=1, single_mode=False, overlap=0, 
+                          ma_thr=20, ma_state=3, flatten_is=False, ylim=[], 
+                          pplot=True, print_stats=True):
     """
     Compare duration of laser-on vs laser-off brain states from closed-loop experiments
     @Params
     ppath - base folder
     recordings - list of recordings
     istate - brain state to analyze
-    plotMode - parameters for bar plot
-               '0' - error bar +/-SEM
-               '1' - black dots for mice;  '2' - color-coded dots for mice
-               '3' - black lines for mice; '4' - color-coded lines for mice
     single_mode - if True, plot individual brain state durations
                   if False, plot mean brain state duration for each mouse
     overlap - float between 0 and 100, specifying minimum percentage of overlap
@@ -1973,6 +1970,8 @@ def state_online_analysis(ppath, recordings, istate=1, plotMode='0', single_mode
     ma_thr, ma_state - max duration and brain state for microarousals
     flatten_is - brain state for transition sleep
     ylim - set y axis limits of bar graph
+    pplot - if True, show plots
+    print_stats - if True, show results of t-test comparison (laser OFF vs laser ON)
     @Returns
     df - dataframe with durations of laser-on and laser-off brain states
     """
@@ -1985,9 +1984,7 @@ def state_online_analysis(ppath, recordings, istate=1, plotMode='0', single_mode
         recordings = [recordings]
     if type(istate) in [list, tuple]:
         istate = istate[0]
-    if single_mode and len(plotMode)>0:
-        plotMode = '05' if '0' in plotMode else '5'
-    overlap = overlap / 100.0
+    overlap /= 100.0
     
     mice = dict()
     # get unique mice
@@ -1997,7 +1994,7 @@ def state_online_analysis(ppath, recordings, istate=1, plotMode='0', single_mode
             mice[idf] = 1
     mice = list(mice.keys())
     if len(mice) == 1:
-        single_mode=True
+        single_mode = True
     
     # collect durations of control & experimental brain states
     dur_exp = {m:[] for m in mice}
@@ -2041,109 +2038,62 @@ def state_online_analysis(ppath, recordings, istate=1, plotMode='0', single_mode
                     dur_exp[idf].append(drn)
                 else:
                     dur_ctr[idf].append(drn)
-    #data = {'mice':[], 'exp':[], 'ctr':[]}
+                    
     dataframe = pd.DataFrame(columns=['mouse','lsr','dur'])
     if len(mice) == 1 or single_mode == True:
+        # collect duration of each REM period
         for m in mice:
-            dataframe = dataframe.append(pd.DataFrame({
-                                                       'mouse':np.repeat([m],len(dur_ctr[m])),
-                                                       'lsr':np.repeat([0],len(dur_ctr[m])),
-                                                       'dur':dur_ctr[m]
-                                                       }), ignore_index=True)
-            dataframe = dataframe.append(pd.DataFrame({
-                                                       'mouse':np.repeat([m],len(dur_exp[m])),
-                                                       'lsr':np.repeat([1],len(dur_exp[m])),
-                                                       'dur':dur_exp[m]
-                                                       }), ignore_index=True)
+            dataframe = pd.concat([dataframe, pd.DataFrame({'mouse':m,
+                                                            'lsr':0,
+                                                            'dur':dur_ctr[m]})],
+                                  axis=0, ignore_index=True)
+            dataframe = pd.concat([dataframe, pd.DataFrame({'mouse':m,
+                                                            'lsr':1,
+                                                            'dur':dur_exp[m]})],
+                                  axis=0, ignore_index=True)
     else:
+        # get average REM durations for each mouse
         for m in mice:
             mdata = [np.array(dur_ctr[m]).mean(), np.array(dur_exp[m]).mean()]
-            dataframe = dataframe.append(pd.DataFrame({
-                                                       'mouse':np.repeat([m],2),
-                                                       'lsr':np.array([0,1]),
-                                                       'dur':np.array(mdata)
-                                                       }), ignore_index=True)
-        
-    # get all brain state trials
-    # if len(mice) == 1 or single_mode==True:
-    #     for m in mice:
-    #         data['exp'] += dur_exp[m]
-    #         data['ctr'] += dur_ctr[m]
-    #     data['mice'] = ['']*max([len(data['ctr']), len(data['exp'])])
-    # # get mouse-averaged brain state duration
-    # else:
-    #     for m in mice:
-    #         dur_ctr[m] = np.array(dur_ctr[m]).mean()
-    #         dur_exp[m] = np.array(dur_exp[m]).mean()
-    #     data['exp'] = np.array(list(dur_exp.values()))
-    #     data['ctr'] = np.array(list(dur_ctr.values()))
-    #     data['mice'] = mice
-    
-    # # create dataframe
-    # df = pd.DataFrame({'mice':data['mice'], 'ctr':pd.Series(data['ctr']), 
-    #                    'exp':pd.Series(data['exp'])})
-    if len(plotMode) > 0:
-        if '5' not in plotMode:
-            mcs = {}
-            for m in mice:
-                mcs.update(colorcode_mice(m))
-        # plot bar graph of laser-off vs laser-on brain state duration
-        plt.ion()
-        plt.figure()
+            dataframe = pd.concat([dataframe, pd.DataFrame({'mouse':m,
+                                                            'lsr':np.array([0,1]),
+                                                            'dur':np.array(mdata)})],
+                                  axis=0, ignore_index=True)
+    if pplot:
+        fig = plt.figure()
         ax = plt.gca()
-        # sns.barplot(x='lsr', y='dur', data=dataframe, ci=68, color=['gray','blue'], ax=ax)
-        l0, l1 = [np.where(dataframe.lsr==i)[0] for i in [0,1]]
-        data_plot = [dataframe.dur[l0].mean(), dataframe.dur[l1].mean()]
-        data_yerr = [dataframe.dur[l0].std() / np.sqrt(len(l0)), 
-                     dataframe.dur[l1].std() / np.sqrt(len(l1))]
-        # data_plot = [df['ctr'].mean(axis=0), df['exp'].mean(axis=0)]
-        # data_yerr = [df['ctr'].std(axis=0) / np.sqrt(len(df['ctr'])), 
-        #              df['exp'].std(axis=0) / np.sqrt(len(df['exp']))]  # SEM
-        if '0' in plotMode:
-            ax.bar([0,1], data_plot, yerr=data_yerr, align='center', 
-                   color=['gray', 'blue'], edgecolor='black')
+        sns.barplot(data=dataframe, x='lsr', y='dur', errorbar='se', 
+                    palette=['gray','blue'], ax=ax)
+        if single_mode:
+            # plot duration of each laser-off and laser-on REM period
+            sns.stripplot(data=dataframe, x='lsr', y='dur', color='black', ax=ax)
+            
         else:
-            ax.bar([0,1], data_plot, align='center', color=['gray', 'blue'], edgecolor='black')
-        # plot individual brain state durations
-        if '5' in plotMode:
-            # a = df['ctr']
-            # b = df['exp']
-            a = dataframe.dur[l0]
-            b = dataframe.dur[l1]
-            ax.plot(np.zeros((len(a),)), a, '.', color='black')
-            ax.plot(np.ones((len(b),)), b, '.', color='black')
-        # plot averaged duration for each mouse
-        else:
-            for mrow, mname in enumerate(mice):
-                points = [dataframe.dur[l0][mrow], dataframe.dur[l1][mrow]]
-                if '1' in plotMode:
-                    markercolor = 'black'
-                elif '2' in plotMode:
-                    markercolor = mcs[mname]
-                if '3' in plotMode:
-                    linecolor = 'black'
-                elif '4' in plotMode:
-                    linecolor = mcs[mname]
-                if '1' in plotMode or '2' in plotMode:
-                    ax.plot([0,1], points, color=markercolor, marker='o', ms=8, markeredgewidth=2,
-                            linewidth=0, markeredgecolor='black', label=mname, clip_on=False)
-                if '3' in plotMode or '4' in plotMode:
-                    ax.plot([0,1], points, color=linecolor, linewidth=2, label=mname)
+            # plot avg duration of laser-off vs laser-on REM periods for each mouse
+            lines = sns.lineplot(data=dataframe, x='lsr', y='dur', hue='mouse', 
+                                 errorbar=None, markersize=0, legend=False, ax=ax)
+            _ = [l.set_color('black') for l in lines.get_lines()]
         # set axis limits and labels
-        ax.set_xticks([0,1])
-        ax.set_xticklabels(['Lsr OFF', 'Lsr ON'])
         ax.set_ylabel('REM duration (s)')
         if len(ylim) == 2:
             ax.set_ylim(ylim)
-        sleepy.box_off(ax)
-        plt.show()
+        sns.despine()
+        
     if print_stats:
-        # stats
-        p = scipy.stats.ttest_rel(dataframe.dur[l0], dataframe.dur[l1], nan_policy='omit')
-        sig='yes' if p.pvalue < 0.05 else 'no'
-        print('')
-        print(f'REM duration lsr off vs on  -- T={round(p.statistic,3)}, p-value={round(p.pvalue,5)}, sig={sig}')
-        print('')
+        if single_mode:
+            # unpaired t-test
+            p = scipy.stats.ttest_ind(np.array(dataframe.dur[np.where(dataframe.lsr==0)[0]]),
+                                      np.array(dataframe.dur[np.where(dataframe.lsr==1)[0]]))
+            ttype = 'unpaired'
+        else:
+            # paired t-test
+            p = scipy.stats.ttest_rel(np.array(dataframe.dur[np.where(dataframe.lsr==0)[0]]),
+                                      np.array(dataframe.dur[np.where(dataframe.lsr==1)[0]]))
+            ttype = 'paired'
+        # print stats
+        print(f'\n###   Laser OFF vs laser ON, state={istate}, {ttype} t-test)')
+        print(f'T={round(p.statistic,3)}, p-val={round(p.pvalue,5)}\n')
+        
     return dataframe
 
 
@@ -2156,7 +2106,7 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
     dv - dependent variable column name (e.g. 'dur' or 'freq')
     iv - independent variable column name (e.g. 'lsr' [0 vs 1] or 'dose' [saline vs cno])
     virus - name of virus expressed in mouse group (e.g. 'chr2' or 'hm3dq' or 'yfp')
-    nboots - number of times to resample whole dataset using bootstrapping
+    nboots - number of times to resample dataset using bootstrapping
     alpha - plot shows 1-$alpha confidence intervals
     shuffle - if True, randomly shuffle condition IDs and bootstrap "sham" data
     seed - if integer, set seed for shuffling condition IDs
@@ -2174,41 +2124,23 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
     if shuffle:
         np.random.seed(seed)
         # for each mouse, randomly shuffle condition labels
-        #lsr_shuffle = np.array(())
-        #iv_shuffle = np.array(())
         iv_shuffle = []
         for m in mice:
             midx = np.where(df.mouse==m)[0]
-            #nl0 = len(np.where(df.lsr[midx]==0)[0])
             n_c0 = len(np.where(df[iv][midx]==conditions[0])[0])
-            #mshuf = np.ones(len(midx))
-            #mshuf = np.array([conditions[1]]*len(midx))
             mshuf = [conditions[1]]*len(midx)
-            #mshuf[np.random.choice(range(len(mshuf)), size=nl0, replace=False)] = 0
             for ishuf in np.random.choice(range(len(mshuf)), size=n_c0, replace=False):
                 mshuf[ishuf] = conditions[0]
-            
-            #mshuf[np.random.choice(range(len(mshuf)), size=n_c0, replace=False)] = 0
-            #lsr_shuffle = np.concatenate((lsr_shuffle, mshuf))
-            #iv_shuffle = np.concatenate((iv_shuffle, mshuf))
             iv_shuffle += mshuf
-        #df['lsr_shuffle'] = lsr_shuffle.astype('int')
         df[f'{iv}_shuffle'] = iv_shuffle
     
     np.random.seed(None)
-    # collect bootstrapped data (rows = bootstrap trials, cols = mice)
-    # boot_c0 = np.zeros((nboots,nmice))
-    # boot_c1 = np.zeros((nboots,nmice))
-    # if shuffle:
-    #     boot_c0_shuf = np.zeros((nboots,nmice))
-    #     boot_c1_shuf = np.zeros((nboots,nmice))
-    
     # collect bootstrapped data (rows = bootstrap trials, cols = conditions)
+    # columns: ctrl true, exp true, ctrl shuffled, exp shuffled, true dif, shuffled dif
     boot_mx = np.zeros((nboots,6))
     
     for i in range(nboots):
-        # collect mean resampled values for each mouse (rows=mice)
-        # columns = conditions (control real, exp real, control shuffled, exp shuffled)
+        # collect mean resampled values for each mouse (rows = mice)
         btrial = np.zeros((nmice,6))
         if i % 500 == 0:
             print('Bootstrapping trial ' + str(i) + ' of ' + str(nboots) + ' ...')
@@ -2222,7 +2154,6 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
             # calculate mean value for each condition, store in mouse row of trial mx
             btrial[midx,0] = np.nanmean(df[dv][c0_select])
             btrial[midx,1] = np.nanmean(df[dv][c1_select])
-            
             if shuffle:
                 # repeat for shuffled rows
                 c0_shuf = np.where((df.mouse==m) & (df[f'{iv}_shuffle']==conditions[0]))[0]
@@ -2237,12 +2168,8 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
         # get "experiment mean" across all sampled mice for each bootstrap trial
         boot_mx[i,:] = np.nanmean(btrial, axis=0)
     
-    # calculate dif. between control and exp conditions for each bootstrap trial
-    # difs = boot_mx[:,1] - boot_mx[:,0]
-    # difs_shuf = boot_mx[:,3] - boot_mx[:,2]
     # store bootstrapped means and condition IDs in dataframe
     IV = np.repeat(conditions + conditions + ['diff', 'diff'], nboots)
-    #DV = np.concatenate([boot_mx.flatten(order='F'), difs, difs_shuf])
     DV = boot_mx.flatten(order='F')
     SHUF = np.repeat([0,0,1,1,0,1], nboots)
     if not shuffle:
@@ -2254,100 +2181,6 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
         plot_bootstrap_online_analysis(boot_df, dv=dv, iv=iv, alpha=alpha)
 
     return boot_df
-    
-    
-    # if shuffle:
-    #     c0_shuf_mean = boot_c0_shuf.mean(axis=1)
-    #     c1_shuf_mean = boot_c1_shuf.mean(axis=1)
-    #     # collect real and shuffled bootstrapped data into dataframe
-    #     IV = np.concatenate(([conditions[0]]*nboots,  # condition 0 (real))
-    #                          [conditions[1]]*nboots,  # condition 1 (real)
-    #                          [conditions[0]]*nboots,  # condition 0 (shuffled)
-    #                          [conditions[1]]*nboots,  # condition 1 (shuffled)
-    #                          ['diff']*nboots,         # condition 1 - 0 (real)
-    #                          ['diff']*nboots))        # condition 1 - 0 (shuffled)
-        
-    #     DV = np.concatenate((c0_mean, c1_mean, c0_shuf_mean, c1_shuf_mean, 
-    #                          c1_mean - c0_mean, c1_shuf_mean - c0_shuf_mean))
-    #     SHUF = np.concatenate((np.zeros(nboots*2), np.ones(nboots*2), np.zeros(nboots), np.ones(nboots)))
-        
-    #     boot_df = pd.DataFrame({iv:IV, dv:DV, 'shuffled':SHUF})
-        
-    #     # boot_df = pd.DataFrame({iv:np.concatenate(([conditions[0]]*nboots,[conditions[1]]*nboots,[conditions[0]]*nboots,[conditions[1]]*nboots)),
-    #     #                         dv:np.concatenate((c0_mean,c1_mean,c0_shuf_mean,c1_shuf_mean)),
-    #     #                         'shuffled':np.concatenate((np.zeros(nboots*2), np.ones(nboots*2)))})
-    # else:
-    #     # collect real bootstrapped data
-    #     IV = np.concatenate(([conditions[0]]*nboots,  # condition 0 (real))
-    #                          [conditions[1]]*nboots,  # condition 1 (real)
-    #                          ['diff']*nboots))        # condition 1 - 0 (real)
-    #     DV = np.concatenate((c0_mean, c1_mean, c1_mean - c0_mean))
-    #     boot_df = pd.DataFrame({iv:IV, dv:DV})
-    
-    
-    # for midx,m in enumerate(mice):
-    #     print('Bootstrapping ' + m + ' ...')
-    #     mdf = df.iloc[np.where(df.mouse==m)[0], :].reset_index(drop=True)
-        
-    #     # get indices of real and shuffled rows for each condition
-    #     c0 = np.where(mdf[iv]==conditions[0])[0]
-    #     c1 = np.where(mdf[iv]==conditions[1])[0]
-    #     if shuffle:
-    #         c0_shuf = np.where(mdf[f'{iv}_shuffle']==conditions[0])[0]
-    #         c1_shuf = np.where(mdf[f'{iv}_shuffle']==conditions[1])[0]
-        
-        # for i in range(nboots):
-        #     # randomly select a new dataset of laser-off and laser-on trials (same size as originals)
-        #     c0_select = np.random.choice(c0, size=len(c0), replace=True)
-        #     c1_select = np.random.choice(c1, size=len(c1), replace=True)
-        #     # get mean duration of selected laser-off and laser-on REM bouts
-        #     c0_mean = mdf[dv][c0_select].mean()
-        #     c1_mean = mdf[dv][c1_select].mean()
-            # boot_c0[i,midx] = c0_mean
-            # boot_c1[i,midx] = c1_mean
-            
-            # if shuffle:
-            #     # repeat for shuffled rows
-            #     c0_shuf_select = np.random.choice(c0_shuf, size=len(c0_shuf), replace=True)
-            #     c1_shuf_select = np.random.choice(c1_shuf, size=len(c1_shuf), replace=True)
-            #     c0_shuf_mean = mdf[dv][c0_shuf_select].mean()
-            #     c1_shuf_mean = mdf[dv][c1_shuf_select].mean()
-            #     boot_c0_shuf[i,midx] = c0_shuf_mean
-            #     boot_c1_shuf[i,midx] = c1_shuf_mean
-
-    # get "experiment mean" across all sampled mice for each bootstrap trial
-    # c0_mean = boot_c0.mean(axis=1)
-    # c1_mean = boot_c1.mean(axis=1)
-    
-    # if shuffle:
-    #     c0_shuf_mean = boot_c0_shuf.mean(axis=1)
-    #     c1_shuf_mean = boot_c1_shuf.mean(axis=1)
-    #     # collect real and shuffled bootstrapped data into dataframe
-    #     IV = np.concatenate(([conditions[0]]*nboots,  # condition 0 (real))
-    #                          [conditions[1]]*nboots,  # condition 1 (real)
-    #                          [conditions[0]]*nboots,  # condition 0 (shuffled)
-    #                          [conditions[1]]*nboots,  # condition 1 (shuffled)
-    #                          ['diff']*nboots,         # condition 1 - 0 (real)
-    #                          ['diff']*nboots))        # condition 1 - 0 (shuffled)
-        
-    #     DV = np.concatenate((c0_mean, c1_mean, c0_shuf_mean, c1_shuf_mean, 
-    #                          c1_mean - c0_mean, c1_shuf_mean - c0_shuf_mean))
-    #     SHUF = np.concatenate((np.zeros(nboots*2), np.ones(nboots*2), np.zeros(nboots), np.ones(nboots)))
-        
-    #     boot_df = pd.DataFrame({iv:IV, dv:DV, 'shuffled':SHUF})
-        
-    #     # boot_df = pd.DataFrame({iv:np.concatenate(([conditions[0]]*nboots,[conditions[1]]*nboots,[conditions[0]]*nboots,[conditions[1]]*nboots)),
-    #     #                         dv:np.concatenate((c0_mean,c1_mean,c0_shuf_mean,c1_shuf_mean)),
-    #     #                         'shuffled':np.concatenate((np.zeros(nboots*2), np.ones(nboots*2)))})
-    # else:
-    #     # collect real bootstrapped data
-    #     IV = np.concatenate(([conditions[0]]*nboots,  # condition 0 (real))
-    #                          [conditions[1]]*nboots,  # condition 1 (real)
-    #                          ['diff']*nboots))        # condition 1 - 0 (real)
-    #     DV = np.concatenate((c0_mean, c1_mean, c1_mean - c0_mean))
-    #     boot_df = pd.DataFrame({iv:IV, dv:DV})
-        # boot_df = pd.DataFrame({iv:np.concatenate(([conditions[0]]*nboots,[conditions[1]]*nboots)),
-        #                         dv:np.concatenate((c0_mean,c1_mean))})
     
 
 def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.05, 
@@ -2388,6 +2221,7 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
     conditions = list(set(df[iv]))
     csort = [list(df[iv]).index(c) for c in conditions]
     conditions = [c for _,c in sorted(zip(csort,conditions))]
+    alpha2 = alpha/2.  # divide alpha by 2 for two-tailed analysis
     
     for virus,ax in zip(viruses,axs):
         vidx = np.where(df.virus==virus)[0]
@@ -2398,8 +2232,8 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
         
         if mode == 0:
             # get 1-$alpha confidence intervals
-            c0_yerr = [np.percentile(c0_data,alpha*100), np.percentile(c0_data,(1-alpha)*100)]
-            c1_yerr = [np.percentile(c1_data,alpha*100), np.percentile(c1_data,(1-alpha)*100)]
+            c0_yerr = [np.percentile(c0_data, (alpha2*100), np.percentile(c0_data,(1-alpha2)*100)]
+            c1_yerr = [np.percentile(c1_data,alpha2*100), np.percentile(c1_data,(1-alpha2)*100)]
             # plot real data
             width = 0.4
             if plotType == 'bar':
@@ -2421,7 +2255,7 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
             # get mean differences in REM duration between laser-off and laser-on trials
             dif_data = c1_data - c0_data
             # get 1-$alpha confidence interval
-            dif_yerr = [np.percentile(dif_data,alpha*100), np.percentile(dif_data,(1-alpha)*100)]
+            dif_yerr = [np.percentile(dif_data,alpha2*100), np.percentile(dif_data,(1-alpha2)*100)]
             # plot real data
             width = 0.8
             if plotType == 'bar':
@@ -2444,8 +2278,8 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
             c1_shuf_data = np.array(df[dv][np.intersect1d(idx_shuf, np.where(df[iv]==conditions[1])[0])])
             if mode == 0:
                 # get 1-$alpha confidence intervals
-                c0_shuf_yerr = [np.percentile(c0_shuf_data,alpha*100), np.percentile(c0_shuf_data,(1-alpha)*100)]
-                c1_shuf_yerr = [np.percentile(c1_shuf_data,alpha*100), np.percentile(c1_shuf_data,(1-alpha)*100)]
+                c0_shuf_yerr = [np.percentile(c0_shuf_data,alpha2*100), np.percentile(c0_shuf_data,(1-alpha2)*100)]
+                c1_shuf_yerr = [np.percentile(c1_shuf_data,alpha2*100), np.percentile(c1_shuf_data,(1-alpha2)*100)]
                 # plot shuffled data
                 if plotType == 'bar':
                     ax.bar([1-width/2], [c0_shuf_data.mean()], color=['gray'], alpha=0.5, width=width, label='shuffled ' + str(conditions[0]))
@@ -2463,7 +2297,7 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
             elif mode == 1:
                 # get mean REM duration differences, 1-$alpha confidence intervals
                 dif_shuf_data = c1_shuf_data - c0_shuf_data
-                dif_shuf_yerr = [np.percentile(dif_shuf_data,alpha*100), np.percentile(dif_shuf_data,(1-alpha)*100)]
+                dif_shuf_yerr = [np.percentile(dif_shuf_data,alpha2*100), np.percentile(dif_shuf_data,(1-alpha2)*100)]
                 # plot shuffled data
                 if plotType == 'bar':
                     ax.bar([1], [dif_shuf_data.mean()], color=['darkgreen'], alpha=0.5, width=width)
@@ -2485,7 +2319,6 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
         ymin = min([ax.get_ylim()[0] for ax in axs])
         ymax = max([ax.get_ylim()[1] for ax in axs])
         y = [ymin,ymax]
-    #y = [-30,70]
     _ = [ax.set_ylim(y) for ax in axs]
     axs[0].set_ylabel(ylabel)
     plt.show()
@@ -2503,7 +2336,7 @@ def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0,
     lsr - laser-off (0) or laser-on (1) ID for each group or both groups (if mode == 0)
     mode - if 0: compare mean REM duration during laser-off or laser-on trials ($lsr param)
                   e.g. non-shuffled laser-on trials in Chr2 mice vs. shuffled laser-on trials in Chr2 mice
-           if 1: compare mean difference in REM duration between laser-off and laser-on trials 
+           if 1: compare mean REM duration differences (laser-on - laser-off)
                   e.g. non-shuffled dur. difference in Chr2 mice vs. shuffled dur. difference in Chr2 mice
     grp_names - optional string labels for [group1, group2]
     pload - optional string specifying a filename to load the dataframe
@@ -2594,6 +2427,11 @@ def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0,
     print('')
 
 def rem_duration(ppath, recordings, tstart=0, tend=-1):
+    """
+    Get duration of each REM period in dataset
+    ppath - base folder
+    recordings - list of recordings
+    """
     df = pd.DataFrame(columns=['mouse', 'recording', 'dur'])
     for rec in recordings:
         # load sampling rate
@@ -2612,7 +2450,6 @@ def rem_duration(ppath, recordings, tstart=0, tend=-1):
         df = pd.concat([df, pd.DataFrame({'mouse':rec.split('_')[0], 
                                           'recording':rec, 
                                           'dur':dur})], axis=0, ignore_index=True)
-        #DATA[rec] = dur
     return df
 
 def compare_online_analysis(ppath, ctr_rec, exp_rec, istate, stat, overlap=0, 
