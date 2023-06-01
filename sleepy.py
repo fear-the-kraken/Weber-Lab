@@ -522,10 +522,20 @@ def my_bpfilter(x, w0, w1, N=4):
     #return y
     from scipy import signal
     b,a = signal.butter(N, [w0, w1], 'bandpass')
-    y = signal.filtfilt(b,a, x)
+    y = signal.filtfilt(b, a, x)
         
     return y
 
+def my_bsfilter(x, w0, w1, N=4):
+    """
+    create N-th order bandstop Butterworth filter with corner frequencies 
+    w0*sampling_rate/2 and w1*sampling_rate/2
+    """
+    from scipy import signal
+    b,a = signal.butter(N, [w0, w1], 'bandstop')
+    y = signal.filtfilt(b, a, x)
+        
+    return y
 
 
 def my_notchfilter(x, sr=1000, band=5, freq=60, ripple=10, order=3, filter_type='butter'):
@@ -725,11 +735,17 @@ def calculate_spectrum(ppath, name, fres=0.5):
     (peeg2, pemg2) = (False, False)
     
     # Calculate EEG spectrogram
-    EEG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EEG.mat'))['EEG'])
+    try:
+        EEG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EEG.mat'))['EEG'])
+    except:
+        EEG = np.squeeze(np.array(h5py.File(os.path.join(ppath, name, 'EEG.mat'),'r').get('EEG')))
     Pxx, f, t = spectral_density(EEG, int(swin), int(fft_win), 1/SR)
     if os.path.isfile(os.path.join(ppath, name, 'EEG2.mat')):
         peeg2 = True
-        EEG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EEG2.mat'))['EEG2'])
+        try:
+            EEG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EEG2.mat'))['EEG2'])
+        except:
+            EEG = np.squeeze(np.array(h5py.File(os.path.join(ppath, name, 'EEG2.mat'),'r').get('EEG2')))
         Pxx2, f, t = spectral_density(EEG, int(swin), int(fft_win), 1/SR)        
     #save the stuff to a .mat file
     spfile = os.path.join(ppath, name, 'sp_' + name + '.mat')
@@ -740,18 +756,25 @@ def calculate_spectrum(ppath, name, fres=0.5):
 
 
     # Calculate EMG spectrogram
-    EMG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EMG.mat'))['EMG'])
-    Qxx, f, t = spectral_density(EMG, int(swin), int(fft_win), 1/SR)
-    if os.path.isfile(os.path.join(ppath, name, 'EMG2.mat')):
-        pemg2 = True
-        EMG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EMG2.mat'))['EMG2'])
-        Qxx2, f, t = spectral_density(EMG, int(swin), int(fft_win), 1/SR)
-    # save the stuff to .mat file
-    spfile = os.path.join(ppath, name, 'msp_' + name + '.mat')
-    if pemg2 == True:
-        so.savemat(spfile, {'mSP':Qxx, 'mSP2':Qxx2, 'freq':f, 'dt':t[1]-t[0],'t':t})
-    else:
-        so.savemat(spfile, {'mSP':Qxx, 'freq':f, 'dt':t[1]-t[0],'t':t})
+    if os.path.isfile(os.path.join(ppath, name, 'EMG.mat')):
+        try:
+            EMG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EMG.mat'))['EMG'])
+        except:
+            EMG = np.squeeze(np.array(h5py.File(os.path.join(ppath, name, 'EMG.mat'),'r').get('EMG')))
+        Qxx, f, t = spectral_density(EMG, int(swin), int(fft_win), 1/SR)
+        if os.path.isfile(os.path.join(ppath, name, 'EMG2.mat')):
+            pemg2 = True
+            try:
+                EMG = np.squeeze(so.loadmat(os.path.join(ppath, name, 'EMG2.mat'))['EMG2'])
+            except:
+                EMG = np.squeeze(np.array(h5py.File(os.path.join(ppath, name, 'EMG2.mat'),'r').get('EMG2')))
+            Qxx2, f, t = spectral_density(EMG, int(swin), int(fft_win), 1/SR)
+        # save the stuff to .mat file
+        spfile = os.path.join(ppath, name, 'msp_' + name + '.mat')
+        if pemg2 == True:
+            so.savemat(spfile, {'mSP':Qxx, 'mSP2':Qxx2, 'freq':f, 'dt':t[1]-t[0],'t':t})
+        else:
+            so.savemat(spfile, {'mSP':Qxx, 'freq':f, 'dt':t[1]-t[0],'t':t})
     
     return Pxx, Qxx, f, t
 
@@ -5028,7 +5051,7 @@ def sleep_spectrum_pwaves(ppath, recordings, win_inc=0.5, win_exc=1, istate=1,
                 count_data[4][idf] = 0
                 
         # load sampling rate
-        sr = get_snr(ppath, rec)
+        sr = AS.get_snr_pwaves(ppath, rec, default='NP')
         nbin = int(np.round(sr) * 2.5)
         dt = (1.0 / sr) * nbin
 
@@ -5050,14 +5073,16 @@ def sleep_spectrum_pwaves(ppath, recordings, win_inc=0.5, win_exc=1, istate=1,
             p_idx = pwaves.get_p_iso(p_idx, sr, win=p_iso)
         elif pcluster:
             p_idx = pwaves.get_pclusters(p_idx, sr, win=pcluster, return_event=clus_event)
-        # load/calculate high-res spectrogram
+            
+        # load/calculate high-res spectrogram using Intan sampling rate
         SPEC = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap,
                                       recalc_highres=recalc_highres, exclude_noise=False)
         SP, f, t = SPEC[0:3]
         spdt = t[1] - t[0]  # seconds per bin in SP
-        spnbin = spdt * sr  # Intan samples per bin in SP
+        spnbin = spdt * sr  # Intan/NP samples per bin in SP
         cf = nbin/spnbin    # conversion factor from $M to #SP time resolution
-        spi_adj = np.linspace(-sr, sr, len(LFP))  # adjust Intan --> SP idx
+        #spi_adj = np.linspace(-sr, sr, len(LFP))  # adjust Intan --> SP idx
+        spi_adj = np.repeat(-sr, len(LFP))
         
         # load and adjust brain state annotation
         M, _ = load_stateidx(ppath, rec)
@@ -5066,6 +5091,7 @@ def sleep_spectrum_pwaves(ppath, recordings, win_inc=0.5, win_exc=1, istate=1,
         # define start and end points of analysis
         istart = int(np.round(tstart*sr))
         iend = len(LFP)-1 if tend==-1 else int(np.round(tend*sr))
+        
         # get qualifying indices of $istate in high-res SP
         seqs = get_sequences(np.where(M==istate)[0])
         seqs = [seq for seq in seqs if seq[0]*nbin >= istart and seq[-1]*nbin < iend]
@@ -5282,18 +5308,25 @@ def sleep_spectrum(ppath, recordings, istate=1, pmode=1, fres=1/3, ma_thr=20.0, 
     for idf in mouse_order:
         for rec in Mice[idf].recordings:
             # load EEG
-            if sig_type =='EEG':
-                if not peeg2:
-                    EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EEG.mat'))['EEG']).astype('float')*conv
-                else:
-                    EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EEG2.mat'))['EEG2']).astype('float')*conv
-            elif sig_type == 'EMG':
-                if not peeg2:
-                    EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EMG.mat'))['EMG']).astype('float')*conv
-                else:
-                    EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EMG2.mat'))['EMG2']).astype('float')*conv
-            else:
-                pass
+            dname = str(sig_type)
+            if peeg2:
+                dname += '2'
+            
+            data = AS.load_eeg_emg(ppath, rec, dname)
+            EEG = np.array(data, dtype='float')*conv
+            
+            # if sig_type =='EEG':
+            #     if not peeg2:
+            #         EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EEG.mat'))['EEG']).astype('float')*conv
+            #     else:
+            #         EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EEG2.mat'))['EEG2']).astype('float')*conv
+            # elif sig_type == 'EMG':
+            #     if not peeg2:
+            #         EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EMG.mat'))['EMG']).astype('float')*conv
+            #     else:
+            #         EEG = np.squeeze(so.loadmat(os.path.join(ppath, rec, 'EMG2.mat'))['EMG2']).astype('float')*conv
+            # else:
+            #     pass
 
             # load brain state
             M,K = load_stateidx(ppath, rec)

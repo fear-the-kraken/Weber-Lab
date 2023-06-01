@@ -20,12 +20,12 @@ import pingouin as ping
 from statsmodels.stats.anova import AnovaRM
 from statsmodels.stats.multicomp import MultiComparison
 from itertools import chain
+import h5py
 import pickle
 import pdb
 # custom modules
 import sleepy
 import AS
-
 
 ##############          SUPPORTING FUNCTIONS          ##############
 
@@ -60,6 +60,7 @@ def mx1d(rec_dict, mouse_avg):
         data = [np.nanmean(mdict[idf]) for idf in mice]
         labels = mice
     return data, labels
+
 
 def mx2d(rec_dict, mouse_avg='trial', d1_size=''):
     """
@@ -117,6 +118,7 @@ def mx2d(rec_dict, mouse_avg='trial', d1_size=''):
             mx=mmx; labels=mice
     return mx, labels
     
+
 def mx2d_dict(rec_dict, mouse_avg, d1_size=''):
     """
     Create a 2-dimensional matrix (trials x time) from 1-dimensional data (time only) 
@@ -175,6 +177,7 @@ def mx2d_dict(rec_dict, mouse_avg, d1_size=''):
             mx_dict[m] = mmx
         return mx_dict
         
+    
 def mx3d(rec_dict, mouse_avg, d_shape=''):
     """
     Create a 3-dimensional matrix (freq x time x subject) from 2-dimensional data (freq x time)
@@ -247,6 +250,7 @@ def mx3d(rec_dict, mouse_avg, d_shape=''):
             layer += 1
         return mx, labels
 
+
 def build_featmx(MX, pre, post):
     """
     For each time bin in input spectrogram, collect SP for a surrounding time window,
@@ -273,6 +277,7 @@ def build_featmx(MX, pre, post):
         A[j,:] = np.reshape(C.T, (nfreq * (pre + post),))
         j += 1
     return A
+
 
 def cross_validation(S, r, theta, nfold=5):
     """
@@ -330,6 +335,7 @@ def cross_validation(S, r, theta, nfold=5):
         l += 1
     return Etest, Etrain
 
+
 def ridge_regression(A, r, theta):
     """
     Estimate linear filter to optimally predict neural activity from EEG spectrogram
@@ -351,6 +357,7 @@ def ridge_regression(A, r, theta):
     k = scipy.linalg.solve(AC, SR)
     return k
 
+
 def df_from_timecourse_dict(tdict_list, mice_list, dose_list, virus_list=[], state_cols=[]):
     """
     Create dataframe from equivalent-length lists of timecourse dictionaries 
@@ -366,7 +373,7 @@ def df_from_timecourse_dict(tdict_list, mice_list, dose_list, virus_list=[], sta
     @Returns
     df - dataframe with info columns for mouse, virus, dose, and brain state, and
                         data columns for each time bin
-         e.g. 'Mouse'  'virus' 'dose'  'state'  't0'  't1'  't2'
+         e.g. 'mouse'  'virus' 'dose'  'state'  't0'  't1'  't2'
                'Bob'    hm3dq   0.25    'REM'    0.2   0.4   0.6
     """
     if len(virus_list) != len(tdict_list):
@@ -375,13 +382,13 @@ def df_from_timecourse_dict(tdict_list, mice_list, dose_list, virus_list=[], sta
     state_cols = list(tdict_list[0].keys())
     times = ['t'+str(i) for i in range(tdict_list[0][state_cols[0]].shape[1])]
     
-    df = pd.DataFrame(columns=['Mouse', 'virus', 'dose', 'state']+times)
+    df = pd.DataFrame(columns=['mouse', 'virus', 'dose', 'state']+times)
     for (tdict, mice, virus, dose) in zip(tdict_list, mice_list, virus_list, dose_list):
         # create mini-dataframe for each brain state
         for state in state_cols:
-            state_df = pd.DataFrame(columns=['Mouse', 'virus', 'dose', 'state']+times)
+            state_df = pd.DataFrame(columns=['mouse', 'virus', 'dose', 'state']+times)
             # for each subject, add mouse name, drug dose, and brain state
-            state_df['Mouse'] = mice
+            state_df['mouse'] = mice
             state_df['virus'] = [virus]*len(mice)
             state_df['dose'] = [dose]*len(mice)
             state_df['state'] = [state]*len(mice)
@@ -390,6 +397,7 @@ def df_from_timecourse_dict(tdict_list, mice_list, dose_list, virus_list=[], sta
                 state_df[t] = tdict[state][:,col]
             df = pd.concat([df, state_df], axis=0, ignore_index=True)
     return df
+
 
 def df_from_rec_dict(rec_dict, val_label=''):
     """
@@ -410,6 +418,7 @@ def df_from_rec_dict(rec_dict, val_label=''):
             data.append((idf, rec, trial_val))
     df = pd.DataFrame(columns=['mouse', 'recording', val_label], data=data)
     return df
+
 
 def get_iwins(win, sr, inclusive=True):
     """
@@ -441,6 +450,7 @@ def get_iwins(win, sr, inclusive=True):
         iwin1 = 0
         iwin2 = int(round(win*sr)) + 1
     return iwin1, iwin2
+
 
 def jitter_laser(lsr, jitter, sr):
     """
@@ -475,6 +485,7 @@ def jitter_laser(lsr, jitter, sr):
     
     return jlsr
 
+
 def spike_threshold(data, th, sign=1):
     """
     Detect potential spikes as waveforms crossing the given threshold $th
@@ -496,10 +507,12 @@ def spike_threshold(data, th, sign=1):
         lidx = np.where(data[0:-2] < data[1:-1])[0]
         ridx = np.where(data[1:-1] >= data[2:])[0]
         thidx = np.where(data[1:-1] > th)[0]
-
         sidx = np.intersect1d(lidx, np.intersect1d(ridx, thidx)) + 1
-
+        
+    sidx = sidx.astype('int32')
+        
     return sidx
+
 
 def detect_noise(LFP, sr, thres=800, win=5, sep=0):
     """
@@ -578,6 +591,7 @@ def get_SP_subset(rec_dict, win, sub_win, pnorm, d_shape=''):
         sub_sps = [AS.adjust_spectrogram(sp, pnorm=pnorm, psmooth=0)[:, sub_idx] for sp in rec_dict[rec]]
         rec_dict[rec] = sub_sps
     return rec_dict
+
 
 def get_lsr_phase(ppath, recordings, istate, bp_filt, min_state_dur=5, ma_thr=20, 
                   ma_state=3, flatten_is=False, post_stim=0.1, psave=False):
@@ -703,6 +717,7 @@ def get_lsr_phase(ppath, recordings, istate, bp_filt, min_state_dur=5, ma_thr=20
         
     return lsr_pwaves, spon_pwaves, success_lsr, fail_lsr, all_phases, success_latencies, amp_lfp, lsr_p_lfp, spon_p_lfp
 
+
 def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=False,
                  tstart=0, tend=-1, ma_thr=20, ma_state=3, flatten_is=False, 
                  exclude_noise=False, nsr_seg=2, perc_overlap=0.95, null=False, 
@@ -716,6 +731,7 @@ def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=Fal
     win: time window (s) to collect data relative to the event
     signal_type: specifies the type of data to collect 
                 'EEG', 'EEG2'                   --> raw hippocampal or prefrontal EEG
+                'EMG'                           --> raw nuchal EMG
                 'SP', 'SP2'                     --> hippocampal or prefrontal SP
                 'SP_NORM', 'SP2_NORM'           --> norm. hippocampal or prefrontal SP
                 'SP_CALC', 'SP2_CALC'           --> calculate each SP using surrounding EEG
@@ -764,44 +780,76 @@ def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=Fal
         p_signal = {s:[] for s in istate}  # signal surrounding P-waves
         null_signal = {s:[] for s in istate}  # signal surrounding randomized time points
         
-        # load sampling rate
-        sr = sleepy.get_snr(ppath, rec)
-        nbin = int(np.round(sr) * 2.5)
-        dt = (1.0 / sr) * nbin
+        # load sampling rate for LFP (may be Intan or Neuropixel)
+        sr = AS.get_snr_pwaves(ppath, rec, default='NP')
+        nbin = int(np.round(sr) * 2.5)  # number of NP samples per 2.5 s brain state bin
+        dt = (1.0 / sr) * nbin          # 
+        
+        # number of LFP samples in pre/post-event collection window
         iwin1, iwin2 = get_iwins(win, sr)
         
-        # load EEG and EEG2
-        EEG = so.loadmat(os.path.join(ppath, rec, 'EEG.mat'), squeeze_me=True)['EEG']
-        if os.path.exists(os.path.join(ppath, rec, 'EEG2.mat')):
-            EEG2 = so.loadmat(os.path.join(ppath, rec, 'EEG2.mat'), squeeze_me=True)['EEG2']
+        # EEG = so.loadmat(os.path.join(ppath, rec, 'EEG.mat'), squeeze_me=True)['EEG']
+        # if os.path.exists(os.path.join(ppath, rec, 'EEG2.mat')):
+        #     EEG2 = so.loadmat(os.path.join(ppath, rec, 'EEG2.mat'), squeeze_me=True)['EEG2']
         
-        # load EMG
-        if os.path.exists(os.path.join(ppath, rec, 'EMG.mat')):
-            EMG = so.loadmat(os.path.join(ppath, rec, 'EMG.mat'), squeeze_me=True)['EMG']
-            EMG = sleepy.my_hpfilter(EMG, 0.01)  # high-pass filter at 5Hz
-        
-        # adjust Intan idx to properly translate to SP idx
-        spi_adjust = np.linspace(-sr, sr, len(EEG))
+        # # load EMG
+        # if os.path.exists(os.path.join(ppath, rec, 'EMG.mat')):
+        #     EMG = so.loadmat(os.path.join(ppath, rec, 'EMG.mat'), squeeze_me=True)['EMG']
+        #     EMG = sleepy.my_hpfilter(EMG, 0.01)  # high-pass filter at 5Hz
         
         # load or calculate entire high-res spectrogram
          # SP calculated using EEG2
         if ('SP2' in signal_type) and (signal_type != 'SP2_CALC'):
-            SP, f, t, sp_nbin, sp_dt = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap, 
-                                                                 recalc_highres=recalc_highres, mode='EEG', peeg2=True)
-            #sp_nbin = len(EEG) / SP.shape[1]
-            sp_win1 = int(round(iwin1/sp_nbin))
+            # SP, f, t, sp_nbin, sp_dt = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap, 
+            #                                                      recalc_highres=recalc_highres, mode='EEG', peeg2=True)
+            # #sp_nbin = len(EEG) / SP.shape[1]
+            # sp_win1 = int(round(iwin1/sp_nbin))
+            # sp_win2 = int(round(iwin2/sp_nbin))
+            SPEC = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap, 
+                                          recalc_highres=recalc_highres, mode='EEG', peeg2=True)
+            
+            SP, f, t = SPEC[0:3]  # high-res SP, freqs, timestamps
+            sp_dt = t[1] - t[0]   # seconds per bin in SP
+            sp_nbin = sp_dt * sr  # Intan/NP samples per bin in SP
+            sp_win1 = int(round(iwin1/sp_nbin))  # number of SP bins in pre/post-event window
             sp_win2 = int(round(iwin2/sp_nbin))
+            #cf = nbin/spnbin    # conversion factor from $M to #SP time resolution
+            
         # SP calculated using EEG
         elif ('SP' in signal_type) and (signal_type != 'SP_CALC'):
-            SP, f, t, sp_nbin, sp_dt = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap, 
-                                                                 recalc_highres=recalc_highres, mode='EEG', peeg2=False)
-            sp_win1 = int(round(iwin1/sp_nbin))
+            # SP, f, t, sp_nbin, sp_dt = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap, 
+            #                                                      recalc_highres=recalc_highres, mode='EEG', peeg2=False)
+            # sp_win1 = int(round(iwin1/sp_nbin))
+            # sp_win2 = int(round(iwin2/sp_nbin))
+            SPEC = AS.highres_spectrogram(ppath, rec, nsr_seg=nsr_seg, perc_overlap=perc_overlap, 
+                                          recalc_highres=recalc_highres, mode='EEG', peeg2=False)
+            
+            SP, f, t = SPEC[0:3]  # high-res SP, freqs, timestamps
+            sp_dt = t[1] - t[0]   # seconds per bin in SP
+            sp_nbin = sp_dt * sr  # Intan/NP samples per bin in SP
+            sp_win1 = int(round(iwin1/sp_nbin))  # number of SP bins in pre/post-event window
             sp_win2 = int(round(iwin2/sp_nbin))
+            #cf = nbin/spnbin    # conversion factor from $M to #SP time resolution
+        
         # calculate SP mean
         if '_NORM' in signal_type:
             SP_mean = SP.mean(axis=1)
             SP_norm = np.divide(SP, np.repeat([SP_mean], SP.shape[1], axis=0).T)  # normalize entire spectrogram
-            
+        
+        
+        # load EEG and EEG2
+        EEG = AS.load_eeg_emg(ppath, rec, 'EEG')
+        EEG2 = AS.load_eeg_emg(ppath, rec, 'EEG2')
+        EMG = AS.load_eeg_emg(ppath, rec, 'EMG')
+        
+        # load Intan sampling rate for EEG/EMG
+        intan_sr = sleepy.get_snr(ppath, rec)
+        
+        intan_dt = 1/intan_sr       # number of seconds per Intan bin
+        intan_nbin = intan_dt * sr  # number of NP samples per Intan bin
+        intan_win1 = int(round(iwin1/intan_nbin))  # number of Intan bins in pre/post-event window
+        intan_win2 = int(round(iwin2/intan_nbin))  #### may be the same as NP bins, if the sampling rates are the same
+        
         # load and adjust brain state annotation
         M, _ = sleepy.load_stateidx(ppath, rec)
         M = AS.adjust_brainstate(M, dt, ma_thr=ma_thr, ma_state=ma_state, 
@@ -829,40 +877,67 @@ def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=Fal
         # define start and end points of analysis
         istart = int(np.round(tstart*sr))
         if tend == -1:
-            iend = len(EEG) - 1
+            iend = len(LFP) - 1
         else:
             iend = int(np.round(tend*sr))
-
-        for pi in p_idx:
-            if pi >= iwin1 and pi + iwin2 < len(EEG) and istart <= pi <= iend:
+            
+        # find P-wave index in EEG/EMG signal
+        if signal_type in ['EEG', 'EEG2', 'EMG']:
+            p_idx_trsl = np.round(np.divide(p_idx, intan_nbin)).astype('int32')
+            
+        # find P-wave index in EEG, calculate surrounding SP
+        elif signal_type in ['SP_CALC','SP2_CALC','SP_CALC_NORM','SP2_CALC_NORM']:
+            p_idx_trsl = np.round(np.divide(p_idx, intan_nbin)).astype('int32')
+        
+        # find P-wave index in high-resolution SP
+        elif signal_type in ['SP', 'SP2', 'SP_NORM', 'SP2_NORM']:
+            # adjust Intan/NP idx to properly translate to SP idx
+            #spi_adjust = np.linspace(-sr, sr, len(LFP))
+            #spi = int(round((pi + spi_adjust[pi])/sp_nbin))
+            #p_idx_trsl = np.round(np.divide((p_idx + spi_adjust[p_idx]), sp_nbin)).astype('int32')
+            p_idx_trsl = np.round(np.divide(p_idx-sr, sp_nbin)).astype('int32')
+        
+        # P-wave index refers directly to LFP signal
+        else:
+            p_idx_trsl = np.array(p_idx)
+            
+        # translate P-wave indices to their corresponding locations in target signal
+        for pi, pi_trsl in zip(p_idx,p_idx_trsl):
+            
+            if pi >= iwin1 and pi + iwin2 < len(LFP) and istart <= pi <= iend:
+                
                 if istate[0] != 'total':
-                    brstate = int(M[int(pi/nbin)])
-                # get data of desired signal type
+                    try:
+                        brstate = int(M[int(pi/nbin)])
+                    except:
+                        pdb.set_trace()
+                
                 if signal_type == 'EEG':
-                    data = EEG[pi-iwin1 : pi+iwin2]
+                    data = EEG[pi_trsl - intan_win1 : pi_trsl + intan_win2]
                 elif signal_type == 'EEG2':
-                    data = EEG2[pi-iwin1 : pi+iwin2]
+                    data = EEG2[pi_trsl - intan_win1 : pi_trsl + intan_win2]
                 elif signal_type == 'EMG':
-                    data = EMG[pi-iwin1 : pi+iwin2]
+                    data = EMG[pi_trsl - intan_win1 : pi_trsl + intan_win2]
+                    
                 # calculate SP from EEG or EEG2
                 elif 'CALC' in signal_type:
                     if 'SP2' in signal_type:
-                        tmp = EEG2[pi-iwin1 : pi+iwin2]
+                        tmp = EEG2[pi_trsl - intan_win1 : pi_trsl + intan_win2]
                     elif 'SP' in signal_type:
-                        tmp = EEG[pi-iwin1 : pi+iwin2]
-                    f, t, data = scipy.signal.spectrogram(tmp, fs=sr, window='hanning', 
-                                                          nperseg=int(nsr_seg*sr), noverlap=int(nsr_seg*sr*perc_overlap))
+                        tmp = EEG[pi_trsl - intan_win1 : pi_trsl + intan_win2]
+                    f, t, data = scipy.signal.spectrogram(tmp, fs=intan_sr, window='hanning', 
+                                                          nperseg=int(nsr_seg*intan_sr), noverlap=int(nsr_seg*intan_sr*perc_overlap))
                     # normalize calculated SP based on entire recording
                     if 'NORM' in signal_type:
                         data = np.divide(data, np.repeat([SP_mean], data.shape[1], axis=0).T)
                 # if not calculating, get SP or SP_NORM from whole recording calculation
                 elif 'SP' in signal_type:
-                    spi = int(round((pi + spi_adjust[pi])/sp_nbin))
-                    if spi >= sp_win1 and spi + sp_win2 < SP.shape[1]:
+                    #spi = int(round((pi + spi_adjust[pi])/sp_nbin))
+                    if pi_trsl >= sp_win1 and pi_trsl + sp_win2 < SP.shape[1]:
                         if 'NORM' in signal_type:
-                            data = SP_norm[:, spi-sp_win1 : spi+sp_win2]
+                            data = SP_norm[:, pi_trsl-sp_win1 : pi_trsl+sp_win2]
                         else:
-                            data = SP[:, spi-sp_win1 : spi+sp_win2]
+                            data = SP[:, pi_trsl-sp_win1 : pi_trsl+sp_win2]
                     else:
                         data = np.array(())
                 elif signal_type == 'LFP':
@@ -896,9 +971,9 @@ def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=Fal
                     sseq_idx = [np.arange(seq[0]*nbin, seq[-1]*nbin+nbin) for seq in sseq]
                     #sseq_idx = np.array((list(chain.from_iterable(sseq_idx))))
                     sseq_idx = np.concatenate(sseq_idx)
-                    sseq_idx = [sidx for sidx in sseq_idx if sidx > iwin1 and sidx < len(EEG)-iwin2 and istart < sidx < iend]
+                    sseq_idx = [sidx for sidx in sseq_idx if sidx > iwin1 and sidx < len(LFP)-iwin2 and istart < sidx < iend]
                 else:
-                    sseq_idx = np.arange(iwin1, len(EEG)-iwin2)
+                    sseq_idx = np.arange(iwin1, len(LFP)-iwin2)
                 # keep only state indices that are not next to a P-wave/laser pulse
                 if null_win != 0:
                     sseq_idx = np.setdiff1d(sseq_idx, not_null_idx)
@@ -909,32 +984,34 @@ def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=Fal
                 # select number of random indices matching the number of P-waves
                 r_idx = np.random.randint(low=0, high=len(sseq_idx), size=len(p_signal[s]))
                 null_idx = sseq_idx[r_idx]
-                for ni in null_idx:
+                
+                null_idx_trsl = np.round(np.divide(null_idx_trsl, divisor)).astype('int32')
+                for ni,ni_trsl in zip(null_idx, null_idx_trsl):
                     # get data of desired signal type
                     if signal_type == 'EEG':
-                        data = EEG[ni-iwin1 : ni+iwin2]
+                        data = EEG[ni_trsl-intan_win1 : ni_trsl+intan_win2]
                     elif signal_type == 'EEG2':
-                        data = EEG2[ni-iwin1 : ni+iwin2]
+                        data = EEG2[ni_trsl-intan_win1 : ni_trsl+intan_win2]
                     elif signal_type == 'EMG':
-                        data = EMG[ni-iwin1 : ni+iwin2]
+                        data = EMG[ni_trsl-intan_win1 : ni_trsl+intan_win2]
                     # calculate SP from EEG or EEG2
                     elif 'CALC' in signal_type:
                         if 'SP2' in signal_type:
-                            tmp = EEG2[ni-iwin1 : ni+iwin2]
+                            tmp = EEG2[ni_trsl-intan_win1 : ni_trsl+intan_win2]
                         elif 'SP' in signal_type:
-                            tmp = EEG[ni-iwin1 : ni+iwin2]
-                        f, t, data = scipy.signal.spectrogram(tmp, fs=sr, window='hanning', 
-                                                              nperseg=int(nsr_seg * sr), noverlap=int(nsr_seg * sr * perc_overlap))
+                            tmp = EEG[ni_trsl-intan_win1 : ni_trsl+intan_win2]
+                        f, t, data = scipy.signal.spectrogram(tmp, fs=intan_sr, window='hanning', 
+                                                              nperseg=int(nsr_seg * intan_sr), noverlap=int(nsr_seg * intan_sr * perc_overlap))
                         # normalize calculated SP based on entire recording
                         if 'NORM' in signal_type:
                             data = np.divide(data, np.repeat([SP_mean], data.shape[1], axis=0).T)
                     # if not calculating, get SP or SP_NORM from whole recording calculation
                     elif 'SP' in signal_type:  
-                        spi = int(round((ni + spi_adjust[ni])/sp_nbin))
+                        #spi = int(round((ni + spi_adjust[ni])/sp_nbin))
                         if 'NORM' in signal_type:
-                            data = SP_norm[:, spi-sp_win1 : spi+sp_win2]
+                            data = SP_norm[:, ni_trsl-sp_win1 : ni_trsl+sp_win2]
                         else:
-                            data = SP[:, spi-sp_win1 : spi+sp_win2]
+                            data = SP[:, ni_trsl-sp_win1 : ni_trsl+sp_win2]
                     elif signal_type == 'LFP':
                         data = LFP[ni-iwin1 : ni+iwin2]
                     else:
@@ -981,6 +1058,7 @@ def get_surround(ppath, recordings, istate, win, signal_type, recalc_highres=Fal
     END = time.perf_counter()
     print(f'COMPUTING TIME --> {END-START:0.2f} seconds ({len(recordings)} recordings, {len(istate)} brainstates, signal type = {signal_type})')
     return p_signal, null_signal, data_shape
+
 
 def get_lsr_surround(ppath, recordings, istate, win, signal_type, recalc_highres=False,
                      tstart=0, tend=-1, ma_thr=20, ma_state=3, flatten_is=False, 
@@ -1350,6 +1428,7 @@ def get_lsr_surround(ppath, recordings, istate, win, signal_type, recalc_highres
     print(f'COMPUTING TIME --> {END-START:0.2f} seconds ({len(recordings)} recordings, {len(istate)} brainstates, signal type = {signal_type})')
     return lsr_pwaves, spon_pwaves, success_lsr, fail_lsr, null_pts, data_shape
 
+
 def get_band_pwr(sp_dict, f, bands, mouse_avg='mouse', pnorm=0, psmooth=0, sf=0, fmax=0):
     """
     Create dictionary with frequency band labels as keys and matrices of averaged EEG power 
@@ -1645,6 +1724,7 @@ def detect_pwaves(ppath, recordings, channel, thres, thres_init=5, dup_win=40,
                                                        'thres_scale': p_thres,
                                                        'p_elim': q})
 
+
 def load_pwaves(ppath, name, return_lfp_noise=False, return_emg_noise=False, return_eeg_noise=False):
     """
     Load LFP signal and detected P-wave indices from .mat files
@@ -1659,39 +1739,67 @@ def load_pwaves(ppath, name, return_lfp_noise=False, return_emg_noise=False, ret
     noise_idx - loaded LFP noise indices (if $return_lfp_noise=True)
     emg_noise_idx - loaded EMG noise indices (if $return_emg_noise=True)
     """
-    # load LFP
+    # load LFP array
     fpath1 = os.path.join(ppath, name, 'LFP_processed.mat')
-    try:
-        LFP = so.loadmat(fpath1, squeeze_me=True)['LFP_processed']
-    except FileNotFoundError:
-        raise FileNotFoundError('This recording has no processed LFP file. Run "detect_pwaves" first.')
+    if os.path.exists(fpath1):
+        try:
+            LFP = so.loadmat(fpath1, squeeze_me=True)['LFP_processed']
+        except ValueError:
+            try:
+                with h5py.File(fpath1, 'r') as f:
+                    LFP = np.squeeze(f['LFP_processed'])
+            except OSError:
+                return OSError('Processed LFP file must be saved in .mat or h5py format')
+    else:
+        return FileNotFoundError('This recording has no processed LFP file. Run "detect_pwaves" first.')
     
+    # load P-wave info file
+    open_fid = []
     # load P-wave indices
     fpath2 = os.path.join(ppath, name, 'p_idx.mat')
-    try:
-        p_idx = so.loadmat(fpath2, squeeze_me=True)['p_idx']
-    except FileNotFoundError:
-        raise FileNotFoundError('This recording has no saved P-wave indices. Run "detect_pwaves" first.')
+    if os.path.exists(fpath2):
+        try:
+            pdata = so.loadmat(fpath2, squeeze_me=True)
+        except ValueError:
+            try:
+                pdata = h5py.File(fpath2, 'r')
+                open_fid.append(pdata)
+            except OSError:
+                return OSError('p_idx file must be saved in .mat or h5py format')
+    else:
+        return FileNotFoundError('This recording has no saved P-wave indices. Run "detect_pwaves" first.')
+    
+    # get requested P-wave data from file
+    arg_list = [[True, 'p'],
+                [return_lfp_noise, 'noise'], 
+                [return_emg_noise, 'emg_noise'], 
+                [return_eeg_noise, 'eeg_noise']]
+    arr_list = []
+    
+    for arg,key in arg_list:
+        arr = np.array((), dtype='int32')
+        if arg == True:
+            # p_idx key in original .mat file
+            if key + '_idx' in pdata.keys():
+                arr = np.squeeze(pdata[key + '_idx']).astype('int32')
+            # p_train key in Neuropixel h5py file
+            elif key + '_train' in pdata.keys():
+                train = np.squeeze(pdata[key + '_train']).astype('int32')
+                if train.shape is not None:
+                    arr = np.where(train == 1)[0].astype('int32')
+            else:
+                if key == 'p':
+                    return Exception('Cannot locate P-wave indices in p_idx file') 
+                else:
+                    x = ['LFP','EEG','EMG'][len(arr_list)-1]
+                    print('### WARNING - No ' + x + ' noise indices found ###')
+        arr_list.append(arr)
+    # close h5py file
+    if len(open_fid) > 0:
+        _ = [f.close() for f in open_fid]
         
-    noise_idx = np.array(()).astype('int')
-    if return_lfp_noise:
-        try:
-            noise_idx = so.loadmat(fpath2, squeeze_me=True)['noise_idx']
-        except KeyError:
-            print('### WARNING - This recording has no saved LFP noise indices ###')
-    emg_noise_idx = np.array(()).astype('int')
-    if return_emg_noise:
-        try:
-            emg_noise_idx = so.loadmat(fpath2, squeeze_me=True)['emg_noise_idx']
-        except KeyError:
-            print('### WARNING - This recording has no saved EMG noise indices ###')
-    eeg_noise_idx = np.array(()).astype('int')
-    if return_eeg_noise:
-        try:
-            eeg_noise_idx = so.loadmat(fpath2, squeeze_me=True)['eeg_noise_idx']
-        except KeyError:
-            print('### WARNING - This recording has no saved EEG noise indices ###')
-    return LFP, p_idx, noise_idx, emg_noise_idx, eeg_noise_idx
+    arr_list.insert(0, LFP)
+    return arr_list
 
 
 def downsample_pwaves(LFP, p_idx, sr, nbin, rec_bins):
@@ -1735,6 +1843,7 @@ def downsample_pwaves(LFP, p_idx, sr, nbin, rec_bins):
     
     return p_idx_dn, p_idx_dn_exact, p_count_dn, p_freq_dn
 
+
 def get_lsr_pwaves(p_idx, lsr, post_stim=0.1, sr=1000., lat_thr=0):
     """
     Get indices of laser-triggered P-waves, spontaneous P-waves, successful
@@ -1763,56 +1872,42 @@ def get_lsr_pwaves(p_idx, lsr, post_stim=0.1, sr=1000., lat_thr=0):
     #lsr_start_idx = [i[0] for i in sleepy.get_sequences(np.where(lsr!=0.)[0])]
     
     # get indices of post-laser windows (defined by $post_stim param)
-    #lsr_trig_idx = [np.arange(i+1, int(i + post_stim*sr)) for i in lsr_start_idx]
-    #lsr_trig_idx_pool = np.array(list(chain.from_iterable(lsr_trig_idx)))
     trig_seqs = [np.arange(i+1, int(i + post_stim*sr)) for i in ilsr_start]
     trig_idx = np.concatenate(trig_seqs)
-    #lsr_trig_seqs = [np.arange(i+1, int(i + post_stim*sr)) for i in lsr_start_idx]
-    #lsr_trig_idx = np.concatenate(lsr_trig_seqs)
     
     # find "laser-triggered" P-waves
-    #lsr_p_idx = np.array([i for i in p_idx if i in lsr_trig_idx_pool])
     lsr_p_idx = np.intersect1d(p_idx, trig_idx)
     # all other P-waves are "spontaneous"
     spon_p_idx = np.setdiff1d(p_idx, lsr_p_idx)
     
     # find "successful" laser pulses
-    #success_lsr = np.array([lsr_start_idx[i] for i in range(0, len(lsr_start_idx)) if len(np.intersect1d(p_idx, lsr_trig_idx[i])) > 0])
     ntrigs = np.array([len(np.intersect1d(iseq,p_idx)) for iseq in trig_seqs])
     itrigs = np.where(ntrigs > 0)[0].astype('int')
     success_lsr = ilsr_start[itrigs]
     # all other laser pulses are "failed"
     fail_lsr = np.setdiff1d(ilsr_start, success_lsr)
     
-    #success_lsr = np.array([lsi for i,lsi in enumerate(lsr_start_idx) if len(np.intersect1d(p_idx, lsr_trig_seqs[i]))>0])
-    # all other laser pulses are "failed"
-    #fail_lsr = np.setdiff1d(lsr_start_idx, success_lsr)
-    
     # apply latency threshold
     lat_elim = []
-    lat_thr = 0
+    #lat_thr = 0
     if lat_thr != 0:
         for li in lsr_p_idx:
             ltrig = success_lsr[np.where(success_lsr < li)[0][-1]]
             lat = round((li - ltrig)/1000*sr, 4)
-            if (lat_thr > 0) and lat <= lat_thr:  # remove low latencies
+            if (lat_thr > 0) and lat <= lat_thr:  # remove p-waves with low latencies
                 lat_elim.append(li)
-            elif (lat_thr < 0) and lat >= lat_thr:  # remove high latencies
+            elif (lat_thr < 0) and lat >= lat_thr:  # remove p-waves with high latencies
                 lat_elim.append(li)
         for sl in success_lsr:
-            ptrig = lsr_p_idx[np.where(lsr_p_idx > sl)[0][0]]
-            lat = round((ptrig - sl)/1000*sr, 4)
-            if (lat_thr > 0) and lat <= lat_thr:
-                lat_elim.append(sl)
-            elif (lat_thr < 0) and lat >= lat_thr:
-                lat_elim.append(sl)
+            ptrigs = lsr_p_idx[np.where((lsr_p_idx > sl) & (lsr_p_idx <= sl + (int(post_stim*sr))))[0]]
+            if all(np.in1d(ptrigs, lat_elim)):
+                lat_elim.append(sl)               # remove laser pulses with no qualifying triggered p-waves
     lat_elim = np.array(lat_elim)
     lsr_p_idx = np.setdiff1d(lsr_p_idx, lat_elim)
     success_lsr = np.setdiff1d(success_lsr, lat_elim)
-    #lsr_p_idx = [li for li in lsr_p_idx if li not in lat_elim]
-    #success_lsr = [sl for sl in success_lsr if sl not in lat_elim]
 
     return lsr_p_idx, spon_p_idx, success_lsr, fail_lsr
+
 
 def get_p_iso(p_idx, sr, win=0.8, order=[1,1]):
     """
@@ -1847,6 +1942,7 @@ def get_p_iso(p_idx, sr, win=0.8, order=[1,1]):
     p_iso_idx = np.array(p_iso_idx)
             
     return p_iso_idx
+
 
 def get_pclusters(p_idx, sr, win=0.5, iso=0, return_event='waves'):
     """
@@ -1909,6 +2005,7 @@ def get_pclusters(p_idx, sr, win=0.5, iso=0, return_event='waves'):
     pcluster_idx = np.array(pcluster_idx)
     
     return pcluster_idx
+
 
 def get_lsr_cluster(ppath, recordings, istate, post_stim=0.1, p_iso=1, pcluster=0.5, 
                     clus_event='waves', ma_thr=20, ma_state=3, flatten_is=False):
@@ -2018,9 +2115,10 @@ def get_lsr_cluster(ppath, recordings, istate, post_stim=0.1, p_iso=1, pcluster=
         print(f'percent cluster  --- spon={round(np.nanmean(spon_perc_clus),3)}, lsr={round(np.nanmean(lsr_perc_clus),3)}')
         print('')
 
+
 def get_lsr_stats(ppath, recordings, istate, post_stim=0.1, p_iso=0, pcluster=0, 
                   clus_event='waves', ma_thr=20, ma_state=3, flatten_is=False, 
-                  lsr_jitter=0, psave=False):
+                  lsr_jitter=0, lat_thr=0, psave=False):
     """
     Get descriptive statistics for spontaneous and laser-triggered P-waves, and
     successful and failed laser pulses
@@ -2082,7 +2180,7 @@ def get_lsr_stats(ppath, recordings, istate, post_stim=0.1, p_iso=0, pcluster=0,
 
         # load laser and find laser-triggered P-waves
         lsr = sleepy.load_laser(ppath, rec)
-        lsr_p_idx, spon_p_idx, lsr_yes_p, lsr_no_p = get_lsr_pwaves(p_idx, lsr, post_stim)
+        lsr_p_idx, spon_p_idx, lsr_yes_p, lsr_no_p = get_lsr_pwaves(p_idx, lsr, post_stim, lat_thr=lat_thr)
         # randomly jitter laser indices and identify sham "successful" and "failed" pulses
         if lsr_jitter > 0:
             jlsr = jitter_laser(lsr, lsr_jitter, sr)
@@ -2141,7 +2239,11 @@ def get_lsr_stats(ppath, recordings, istate, post_stim=0.1, p_iso=0, pcluster=0,
                         if sei in li:  # laser-triggered P-waves
                             eventID = 'lsr-triggered pwave'  # event label
                             amp = -seq_lfp[sei]  # raw LFP value
-                            trig_lsr_idx = yi[np.where(yi < sei)[0][-1]]
+                            try:
+                                trig_lsr_idx = yi[np.where(yi < sei)[0][-1]]
+                            except:
+                                print('triggering pulse outside sequence')
+                                continue
                             lat = round((sei - trig_lsr_idx)/sr*1000, 4)  # latency from laser onset
                             halfwidth = get_halfwidth(seq_lfp,sei,sr)  # waveform half-width
                             amp2 = get_amp(seq_lfp,sei,sr)  # waveform amplitude
@@ -2202,11 +2304,14 @@ def get_lsr_stats(ppath, recordings, istate, post_stim=0.1, p_iso=0, pcluster=0,
 
     # assemble and save dataframe
     df = pd.concat(df_rows, axis=1).transpose()
-    pdb.set_trace()
     if psave:
         filename = psave if isinstance(psave, str) else f'lsr_stats'
-        df.to_pickle(f'{filename}.pkl')
+        if filename.endswith('.pkl'):
+            df.to_pickle(os.path.join(ppath,filename))
+        else:
+            df.to_pickle(os.path.join(ppath,f'{filename}.pkl'))
     return df
+
 
 def get_amp(LFP, pi, sr):
     """
@@ -2251,6 +2356,7 @@ def get_amp(LFP, pi, sr):
         height = np.abs(amp2 - amp1)
         return height
     
+    
 def get_halfwidth(LFP, pi, sr):
     """
     Calculate width of P-wave at 1/2 maximum amplitude
@@ -2280,6 +2386,7 @@ def get_halfwidth(LFP, pi, sr):
         return np.nan
     else:
         return width
+
 
 def inter_pwave_intervals(ppath, recordings, istate, bins=50, prange=(0,20), 
                           ma_thr=20, ma_state=3, flatten_is=False):
@@ -2349,6 +2456,7 @@ def inter_pwave_intervals(ppath, recordings, istate, bins=50, prange=(0,20),
     
     return intervals_ms
 
+
 def pwave_overview(ppath, recordings, tstart=0, tend=-1, ma_thr=20, ma_state=3, flatten_is=False):
     """
     Plot P-wave frequency and brain state annotation for a given recording
@@ -2375,7 +2483,7 @@ def pwave_overview(ppath, recordings, tstart=0, tend=-1, ma_thr=20, ma_state=3, 
     for rec in recordings:
         
         # load sampling rate
-        sr = sleepy.get_snr(ppath, rec)
+        sr = AS.get_snr_pwaves(ppath, rec, default='NP')
         nbin = int(np.round(sr) * 2.5)
         dt = (1.0 / sr) * nbin
         
@@ -2607,14 +2715,7 @@ def pwave_emg(ppath, recordings, emg_source, win, istate=[], rem_cutoff=True, re
                         #     d = EMG_amp[int(i/mnbin)-iwin1 : int(i/mnbin)+iwin2+1]
                         #     emg_data.append(d)
                 pdata[s][rec] = emg_data
-    # get matrix of (subject x time)
-    # if plaser:
-    #     lsr_mx, mice = mx2d(lsr_data, mouse_avg=mouse_avg)
-    #     spon_mx, mice = mx2d(spon_data, mouse_avg=mouse_avg)
-    #     success_mx, mice = mx2d(success_data, mouse_avg=mouse_avg)
-    #     fail_mx, mice = mx2d(fail_data, mouse_avg=mouse_avg)
-    # else:
-    #     pdata_mx, mice = mx2d(pdata, mouse_avg=mouse_avg)
+    
     if pplot:
         if plaser:
             if lsr_mode == 'pwaves':
@@ -2638,7 +2739,7 @@ def pwave_emg(ppath, recordings, emg_source, win, istate=[], rem_cutoff=True, re
             mx = [AS.convolve_data(m, sf, axis='x') if m is not None else None for m in mx]
             if plaser:
                 mx2 = [AS.convolve_data(m2, sf, axis='x') if m2 is not None else None for m2 in mx2]
-        
+                
         x = np.linspace(-np.abs(win[0]), win[1], mx[0].shape[1])
         # plot graphs
         fig = plt.figure()
@@ -2650,7 +2751,7 @@ def pwave_emg(ppath, recordings, emg_source, win, istate=[], rem_cutoff=True, re
             ax = fig.add_subplot(grid[iplt])
             if mx[i] is not None:
                 data = np.nanmean(mx[i], axis=0)
-                yerr = np.nanstd(mx[i], axis=0) / np.sqrt(mx[i].shape[1])
+                yerr = np.nanstd(mx[i], axis=0) / np.sqrt(mx[i].shape[0])
                 ax.plot(x, data, color=c, linewidth=3)
                 ax.fill_between(x, data-yerr, data+yerr, color=c, alpha=0.5)
                 if i == len(mx)-1:
@@ -2664,7 +2765,7 @@ def pwave_emg(ppath, recordings, emg_source, win, istate=[], rem_cutoff=True, re
                 ax2 = fig.add_subplot(grid[iplt])
                 if mx2[i] is not None:
                     data2 = np.nanmean(mx2[i], axis=0)
-                    yerr2 = np.nanstd(mx2[i], axis=0) / np.sqrt(mx2[i].shape[1])
+                    yerr2 = np.nanstd(mx2[i], axis=0) / np.sqrt(mx2[i].shape[0])
                     ax2.plot(x, data2, color=c2, linewidth=3)
                     ax2.fill_between(x, data2-yerr2, data2+yerr2, color=c2, alpha=0.5)
                     if i == len(mx2)-1:
@@ -2683,6 +2784,7 @@ def pwave_emg(ppath, recordings, emg_source, win, istate=[], rem_cutoff=True, re
         return [lsr_data, spon_data, success_data, fail_data], mice
     else:
         return [pdata], mice
+    
     
 def detect_emg_twitches(ppath, rec, recalc_twitches=False, thres=99, thres_type='perc', 
                         thres_mode=1, thres_first=0, min_twitchdur=0.1, min_twitchsep=0.2, 
@@ -2953,8 +3055,6 @@ def emg_twitch_freq(ppath, recordings, recalc_twitches=False, thres=99, thres_ty
         twitch_freq_dict[rec] = f
     data, labels = mx1d(twitch_freq_dict, mouse_avg=mouse_avg)
     return twitch_freq_dict
-     
-
         
         
                         
@@ -2981,6 +3081,7 @@ def cross_correlate(dff, LFP, dn, iwin, ptrain, dffnorm=True):
         dffdn -= dffdn.mean()
     # downsample LFP signal
     LFPdn = AS.downsample_vec(LFP, dn)
+    #LFPdn = LFP
     if ptrain:  # restore P-wave train of 1's and 0's
         LFPdn = np.ceil(LFPdn).astype('int')
         # For each timepoint relative to a P-wave, the correlation value is the sum
@@ -3003,7 +3104,7 @@ def cross_correlate(dff, LFP, dn, iwin, ptrain, dffnorm=True):
 
 
 def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=True, 
-                    ptrial=True, dn=1, sf=0, ma_thr=20, ma_state=3, flatten_is=4, p_iso=0,
+                    ptrial=True, dn=1, sf=0, min_dur=30, ma_thr=20, ma_state=3, flatten_is=4, p_iso=0,
                     mouse_avg='trial', jitter=True, jtr_win=10, use405=False, seed=0, base_int=0.5, 
                     baseline_start=0, baseline_end=-1, pplot=True, print_stats=True):
     """
@@ -3018,7 +3119,8 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
              if False, use LFP signal for cross-correlation
     ptrial - if True, consider each P-wave as a 'trial' for single-trial averaging
              if False, consider each state sequence as a 'trial'
-    df, sf - downsampling and smoothing factors for plot
+    dn, sf - downsampling and smoothing factors for plot
+    min_dur - minimum duration (s) of brain state episode
     ma_thr, ma_state - max duration and brain state for microarousals
     flatten_is - brain state for transition sleep
     p_iso - inter-P-wave interval threshold for analyzing isolated P-waves
@@ -3031,7 +3133,7 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
     baseline_start - no. of bins into timecourse to start "baseline" bin
     baseline_end - no. of bins into timecourse to end comparisons
     pplot - if True, show plots
-    print_stats - if True, print stats summary
+    print_stats - if True, show results of repeating t-tests w/ Bonferroni correction
     @Returns
     [CC_mx, labels] - matrix (subjects x time) of DF/F vs P-wave cross-correlations, mouse/trial labels
     [CC_mx_jtr, jlabels] - matrix of DF/F vs shifted P-wave cross-correlations, mouse/trial labels
@@ -3066,6 +3168,7 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
         # cross-correlate signals for each brainstate sequence
         if istate > 0:
             sseq = sleepy.get_sequences(np.where(M==istate)[0])
+            sseq = [seq for seq in sseq if len(seq)*2.5 >= min_dur]
             CC = []
             Cdff = []
             Clfp = []
@@ -3159,7 +3262,13 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
         # cross-correlate entire recording signals
         elif istate <= 0:
             CC = []
+            Cdff = []
+            Clfp = []
+            
             CC_jtr = []
+            Cdff_jtr = []
+            Clfp_jtr = []
+
             if jitter:
                 # randomly jitter each P-wave up to +/- $jtr_win s
                 np.random.seed(seed)
@@ -3239,15 +3348,15 @@ def dff_pwaves_corr(ppath, recordings, win=2, istate=1, dffnorm=True, ptrain=Tru
             print('P-wave Train vs DF/F\n')
         baseline_start = int(baseline_start*sr)
         baseline_end = int(baseline_end*sr) if baseline_end != -1 else -1
-        df = stats_timecourse(CC_mx, pre=-iwin/sr, post=iwin/sr, sr=sr, 
-                                      base_int=base_int, baseline_start=baseline_start,
-                                      baseline_end=baseline_end, print_stats=print_stats)
+        df = stats_timecourse(CC_mx, pre=-np.abs(win), post=np.abs(win), sr=sr/dn, 
+                              base_int=base_int, baseline_start=baseline_start,
+                              baseline_end=baseline_end, print_stats=print_stats)
         if jitter:
             if print_stats:
                 print('\nJittered P-wave Train vs DF/F\n')
-            df_jtr = stats_timecourse(CC_mx_jtr, pre=-iwin/sr, post=iwin/sr, sr=sr, 
-                                              base_int=base_int, baseline_start=baseline_start,
-                                              baseline_end=baseline_end, print_stats=print_stats)
+            df_jtr = stats_timecourse(CC_mx_jtr, pre=-np.abs(win), post=np.abs(win), sr=sr/dn,
+                                      base_int=base_int, baseline_start=baseline_start,
+                                      baseline_end=baseline_end, print_stats=print_stats)
 
     if pplot:
         t = np.linspace(-win, win, CC_mx.shape[1])
@@ -3279,7 +3388,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
                    mouse_avg='mouse', base_int=10, baseline_start=0, 
                    baseline_end=-1, ma_thr=20, ma_state=3, flatten_is=False, 
                    tstart=0, tend=-1, jitter=0, use405=False, ylim=[], ylim2=[], 
-                   print_stats=True, pplot=True):
+                   print_stats=True, pplot=True, exclude={}):
     """
     Get average DF/F signal surrounding P-waves in any brain state
     @Params
@@ -3315,7 +3424,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
     jitter - if > 0, randomly shift P-wave indices by +/- $jitter seconds (as a control)
     use405 - if True, analyze 'baseline' 405 signal instead of fluorescence signal
     ylim, ylim2 - set y axis limits of timecourse and bar graph
-    print_stats - if True, print stats summary
+    print_stats - if True, show results of repeating t-tests w/ Bonferroni correction
     pplot - if True, plot graphs
     @Returns
     ddict - data dictionary containing DF/F signals surrounding each P-wave
@@ -3381,13 +3490,20 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
 
         # if $istate is an integer, find all P-wave indices in that state
         if not isinstance(istate, str):
-            if istate != 0:
+            if istate == 0:
+                p_idx = idx
+            else:
                 idx_dn = np.floor(idx/nbin).astype('int')
-                idx_dn_state = np.intersect1d(idx_dn, np.where(M==istate)[0])
+                if isinstance(istate, int):
+                    istate = [istate]
+                sidx = [np.where(M==s)[0] for s in istate if rec not in exclude.get(s,[])]
+                if len(sidx) == 0:
+                    continue
+                else:
+                    sidx = np.concatenate(sidx)
+                idx_dn_state = np.intersect1d(idx_dn, sidx)
                 iidx = np.nonzero(np.in1d(idx_dn, idx_dn_state))[0]
                 p_idx = idx[iidx]
-            else:
-                p_idx = idx
                 
         # define start and end points of analysis
         istart = int(np.round(tstart*sr))
@@ -3439,7 +3555,7 @@ def dff_timecourse(ppath, recordings, istate, dff_win=[-10,10], plotMode='0',
                                 baseline_end=int(baseline_end*sr) if baseline_end != -1 else -1,
                                 print_stats=print_stats)
             print('')
-        
+
         # smooth/downsample along time dimension
         if sf:
             mx = AS.convolve_data(mx, sf, axis='x')
@@ -3733,7 +3849,7 @@ def state_freq(ppath, recordings, istate, plotMode='0', tstart=0, tend=-1,
                ma_thr=20, ma_state=3, flatten_is=False, wf_win=[0.5,0.5],
                p_iso=0, pcluster=0, clus_event='waves', noise_state=2, 
                exclude_noise=False, mouse_avg='mouse', avg_mode='all', pplot=True, 
-               print_stats=True, ylim1=[], ylim2=[], return_mode='mx'):
+               print_stats=True, ylim1=[], ylim2=[], return_mode='mx', handle_sr='NP'):
     """
     Plot average P-wave frequency and waveform in each state
     @Params
@@ -3758,7 +3874,7 @@ def state_freq(ppath, recordings, istate, plotMode='0', tstart=0, tend=-1,
     avg_mode - for each recording, P-wave freq is computed as the average across 
                all state bins ('all'), or from the averages of each state sequence ('each')
     pplot - if True, show plots
-    print_stats - if True, print stats summary
+    print_stats - if True, show results of repeated measures ANOVA
     ylim1, ylim2 - set y axis limits for P-wave frequency bar plot and avg waveform plot
     @Returns
     mice - list of mouse names, corresponding to rows in freq_mx & waveform_mx
@@ -3796,7 +3912,8 @@ def state_freq(ppath, recordings, istate, plotMode='0', tstart=0, tend=-1,
         idf = re.split('_', rec)[0]
         
         # load sampling rate
-        sr = sleepy.get_snr(ppath, rec)
+        sr = AS.get_snr_pwaves(ppath, rec, default='NP')
+        #sr = sleepy.get_snr(ppath, rec)
         nbin = int(np.round(sr) * 2.5)
         dt = (1.0 / sr) * nbin
         
@@ -3804,7 +3921,6 @@ def state_freq(ppath, recordings, istate, plotMode='0', tstart=0, tend=-1,
         M, _ = sleepy.load_stateidx(ppath, rec)
         M = AS.adjust_brainstate(M, dt=dt, ma_thr=ma_thr, ma_state=ma_state, 
                                  flatten_is=flatten_is, noise_state=noise_state)
-    
         # load LFP and P-wave indices
         if exclude_noise:
             # load noisy LFP indices, make sure no P-waves are in these regions
@@ -3917,12 +4033,12 @@ def state_freq(ppath, recordings, istate, plotMode='0', tstart=0, tend=-1,
                             ylim2=ylim2, group_colors='states', group_labels=[], legend='all')
         
         # stats
-        if print_stats and len(istate) > 2:
+        if print_stats and len(istate) > 2 and len(mice) > 1:
             res_anova = ping.rm_anova(data=df, subject=mouse_avg, dv='freq', within=['state'])
             ping.print_table(res_anova)
             if res_anova.loc[0,'p-unc'] < 0.05:
-                res_tt = ping.pairwise_ttests(data=df, subject=mouse_avg, dv='freq', 
-                                              within=['state'], padjust='Holm')
+                res_tt = ping.pairwise_tests(data=df, subject=mouse_avg, dv='freq', 
+                                             within=['state'], padjust='Holm')
                 ping.print_table(res_tt)
             
         if return_mode == 'mx':
@@ -4177,10 +4293,12 @@ def plot_state_freq(brainstates, mice, freq_mx_list, waveform_mx_list, plotMode=
     for mw in mouse_warnings: print(mw)
     
     
-def activity_transitions(ppath, recordings, transitions, pre, post, si_threshold, sj_threshold, mode='pwaves',
-                         tstart=0, tend=-1, ma_thr=20, ma_state=3, flatten_is=False, fmax=30, pnorm=1,
-                         psmooth=0, sf=0, vm=[], mouse_avg='mouse', base_int=10, base_start=0, base_end=-1, 
-                         xlim=[], ylim=[], pzscore=False, pplot=True, print_stats=True):
+def activity_transitions(ppath, recordings, transitions, pre, post, si_threshold, 
+                         sj_threshold, mode='pwaves', tstart=0, tend=-1, ma_thr=20, 
+                         ma_state=3, flatten_is=False, fmax=30, pnorm=1, psmooth=0, 
+                         sf=0, vm=[], mouse_avg='mouse', base_int=10, base_start=0, 
+                         base_end=-1, xlim=[], ylim=[], pzscore=False, pplot=True, 
+                         print_stats=True):
     """
     Plots timecourse of signals during X-->Y brain state transitions (absolute time)
     @Params
@@ -4210,7 +4328,7 @@ def activity_transitions(ppath, recordings, transitions, pre, post, si_threshold
     xlim, ylim - set x and y axis limits for timecourse graph
     pzscore - if True, z-score signal by its mean across the recording
     pplot - if True, plot timecourse graph
-    print_stats - if True, print stats summary
+    print_stats - if True, show results of repeating t-tests w/ Bonferroni correction
     @Returns
     mice - list of mouse names
     trans_pwave - timecourse dictionary (key=transitions, value=matrix of subject x time)
@@ -4256,7 +4374,7 @@ def activity_transitions(ppath, recordings, transitions, pre, post, si_threshold
             print("Getting data for", rec, "...")
             
             # load sampling rate
-            sr = sleepy.get_snr(ppath, rec)
+            sr = AS.get_snr_pwaves(ppath, rec, default='NP')
             nbin = int(np.round(sr)*2.5)
             dt = (1.0/sr)*nbin
             
@@ -4520,7 +4638,7 @@ def stateseq(ppath, recordings, sequence, nstates, state_thres, sign=['>','>','>
     xlim, ylim - set x and y axis limits for timecourse graph
     pzscore - if True, z-score signal by its mean across the recording
     pplot - if True, plot timecourse graph
-    print_stats - if True, print stats summary
+    print_stats - if True, show results of repeating t-tests w/ Bonferroni correction
     @Returns
     mice - list of mouse names
     mx_pwave - timecourse dictionary (key=transitions, value=matrix of subject x time)
@@ -4665,7 +4783,7 @@ def stateseq(ppath, recordings, sequence, nstates, state_thres, sign=['>','>','>
         print('')
         print('')
         print('')
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan
         
     seq_pwave = {'trial':[]}
     seq_spe = {'trial':[]}
@@ -5416,7 +5534,7 @@ def plot_sleep_timecourse(TimeCourse_list, mice, tstart, tbin, stats, plotMode='
 def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart=0, 
                  tend=-1, ma_thr=20, ma_state=3, flatten_is=False, mouse_avg='mouse', 
                  exclude_noise=False, plaser=True, post_stim=0.1, lsr_iso=0, pload=False, 
-                 psave=False, p_iso=0, pcluster=0, clus_event='waves', wform_std=True, 
+                 psave=False, p_iso=0, pcluster=0, clus_event='waves', wform_std=True, ci='sem',
                  ylim=[], signal_type='LFP', dn=1):
     """
     Calculate average LFP or EMG signal surrounding P-waves and laser pulses in any brain state
@@ -5450,7 +5568,7 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
     signal_type - 'LFP' or 'EMG'
     dn - downsample signal by X bins across time axis
     @Returns
-    None
+    df - dataframe of trial/recording/mouse ID, state, event type, and signal amplitude for each time point
     """
     # clean data inputs
     if not isinstance(recordings, list):
@@ -5487,27 +5605,34 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
                                 null=False, psave=psave, p_iso=p_iso, pcluster=pcluster, clus_event=clus_event)
             p_signal, null_signal, data_shape = data
     
+    df = pd.DataFrame(columns=['id','state','event','time','amp'])
+    
     if plaser:
         for s in istate:
             # create single matrix (trials x time) of all trials
             if mouse_avg == 'trial':
-                lsr_p_wf_mx = mx2d(lsr_pwaves[s], d1_size = data_shape[0])[0]
-                spon_p_wf_mx = mx2d(spon_pwaves[s], d1_size = data_shape[0])[0]
-                success_lsr_wf_mx = mx2d(success_lsr[s], d1_size = data_shape[0])[0]
-                fail_lsr_wf_mx = mx2d(fail_lsr[s], d1_size = data_shape[0])[0]
+                lsr_p_wf_mx, lsr_ids = mx2d(lsr_pwaves[s], d1_size = data_shape[0])
+                spon_p_wf_mx, spon_ids = mx2d(spon_pwaves[s], d1_size = data_shape[0])
+                success_lsr_wf_mx, success_ids = mx2d(success_lsr[s], d1_size = data_shape[0])
+                fail_lsr_wf_mx, fail_ids = mx2d(fail_lsr[s], d1_size = data_shape[0])
             
             # create dictionary of matrices (trials x time) for each recording or mouse
             elif mouse_avg == 'recording' or mouse_avg == 'mouse':
-                lsr_p_wf_avg = mx2d_dict(lsr_pwaves[s], mouse_avg, d1_size = data_shape[0])[0]
-                spon_p_wf_avg = mx2d_dict(spon_pwaves[s], mouse_avg, d1_size = data_shape[0])[0]
-                success_lsr_wf_avg = mx2d_dict(success_lsr[s], mouse_avg, d1_size = data_shape[0])[0]
-                fail_lsr_wf_avg = mx2d_dict(fail_lsr[s], mouse_avg, d1_size = data_shape[0])[0]
+                lsr_p_wf_avg = mx2d_dict(lsr_pwaves[s], mouse_avg, d1_size = data_shape[0])
+                spon_p_wf_avg = mx2d_dict(spon_pwaves[s], mouse_avg, d1_size = data_shape[0])
+                success_lsr_wf_avg = mx2d_dict(success_lsr[s], mouse_avg, d1_size = data_shape[0])
+                fail_lsr_wf_avg = mx2d_dict(fail_lsr[s], mouse_avg, d1_size = data_shape[0])
+                # get recording/mouse names
+                lsr_ids = list(lsr_p_wf_avg.keys())
+                spon_ids = list(spon_p_wf_avg.keys())
+                success_ids = list(success_lsr_wf_avg.keys())
+                fail_ids = list(fail_lsr_wf_avg.keys())
                 
                 # get single matrix (recording/mouse averages x time)
-                lsr_p_wf_mx = np.array(([np.nanmean(lsr_p_wf_avg[k], axis=0) for k in lsr_p_wf_avg.keys()]))
-                spon_p_wf_mx = np.array(([np.nanmean(spon_p_wf_avg[k], axis=0) for k in spon_p_wf_avg.keys()]))
-                success_lsr_wf_mx = np.array(([np.nanmean(success_lsr_wf_avg[k], axis=0) for k in success_lsr_wf_avg.keys()]))
-                fail_lsr_wf_mx = np.array(([np.nanmean(fail_lsr_wf_avg[k], axis=0) for k in fail_lsr_wf_avg.keys()]))
+                lsr_p_wf_mx = np.array(([np.nanmean(lsr_p_wf_avg[k], axis=0) for k in lsr_ids]))
+                spon_p_wf_mx = np.array(([np.nanmean(spon_p_wf_avg[k], axis=0) for k in spon_ids]))
+                success_lsr_wf_mx = np.array(([np.nanmean(success_lsr_wf_avg[k], axis=0) for k in success_ids]))
+                fail_lsr_wf_mx = np.array(([np.nanmean(fail_lsr_wf_avg[k], axis=0) for k in fail_ids]))
             else:
                 raise Exception(f'ERROR : "{mouse_avg}" is not a valid averaging method.')
             # downsample signal
@@ -5518,27 +5643,61 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
                 fail_lsr_wf_mx = AS.downsample_mx(fail_lsr_wf_mx, int(dn), axis='x')
                 
             if mode == 'pwaves':
+                x = np.linspace(-np.abs(win[0]), win[1], lsr_p_wf_mx.shape[1])
+                # create dataframe
+                ddf1 = pd.DataFrame({'id':np.repeat(lsr_ids, len(x)),
+                                     'state':states[s],
+                                     'event':'laser-triggered p-wave',
+                                     'time':np.tile(x, len(lsr_ids)),
+                                     'amp':lsr_p_wf_mx.flatten()})
+                ddf2 = pd.DataFrame({'id':np.repeat(spon_ids, len(x)),
+                                     'state':states[s],
+                                     'event':'spontaneous p-wave',
+                                     'time':np.tile(x, len(spon_ids)),
+                                     'amp':spon_p_wf_mx.flatten()})
+                df = pd.concat([df,ddf1,ddf2], axis=0, ignore_index=True)
+                
                 # mx1 for laser-triggered P-waves, mx2 for spontaneous P-waves
                 mx1_data = np.nanmean(lsr_p_wf_mx, axis=0) #/ 1000  # convert uV to mV
                 mx1_sem = np.nanstd(lsr_p_wf_mx, axis=0) #/ 1000 # +/- std
+                if ci == 'sem':
+                    mx1_sem /= np.sqrt(lsr_p_wf_mx.shape[0])
                 title1 = 'Laser-Triggered P-waves'
                 color1 = 'blue'
                 mx2_data = np.nanmean(spon_p_wf_mx, axis=0) #/ 1000
                 mx2_sem = np.nanstd(spon_p_wf_mx, axis=0) #/ 1000  # +/- std
+                if ci == 'sem':
+                    mx2_sem /= np.sqrt(spon_p_wf_mx.shape[0])
                 title2 = 'Spontaneous P-waves'
                 color2 = 'green'
             # mx1 for successful lsr, mx2 for failed lsr
             if mode == 'lsr':
+                x = np.linspace(-np.abs(win[0]), win[1], success_lsr_wf_mx.shape[1])
+                # create dataframe
+                ddf1 = pd.DataFrame({'id':np.repeat(success_ids, len(x)),
+                                     'state':states[s],
+                                     'event':'successful laser',
+                                     'time':np.tile(x, len(success_ids)),
+                                     'amp':success_lsr_wf_mx.flatten()})
+                ddf2 = pd.DataFrame({'id':np.repeat(fail_ids, len(x)),
+                                     'state':states[s],
+                                     'event':'failed laser',
+                                     'time':np.tile(x, len(fail_ids)),
+                                     'amp':fail_lsr_wf_mx.flatten()})
+                df = pd.concat([df,ddf1,ddf2], axis=0, ignore_index=True)
                 mx1_data = np.nanmean(success_lsr_wf_mx, axis=0) #/ 1000
                 mx1_sem = np.nanstd(success_lsr_wf_mx, axis=0) #/ 1000  # +/- std
+                if ci == 'sem':
+                    mx1_sem /= np.sqrt(success_lsr_wf_mx.shape[0])
                 title1 = 'Successful Laser Pulses'
                 color1 = 'blue'
                 mx2_data = np.nanmean(fail_lsr_wf_mx, axis=0) #/ 1000
                 mx2_sem = np.nanstd(fail_lsr_wf_mx, axis=0) #/ 1000 # +/- std
+                if ci == 'sem':
+                    mx2_sem /= np.sqrt(fail_lsr_wf_mx.shape[0])
                 title2 = 'Failed Laser Pulses'
                 color2 = 'red'
             
-            x = np.linspace(-np.abs(win[0]), win[1], len(mx1_data))
             # plot waveform1 vs waveform2 for each state
             fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, constrained_layout=True)
             fig.suptitle(f'State={s}, averaged by {mouse_avg}')
@@ -5565,12 +5724,13 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
         for s in p_signal.keys():
             # create single matrix (trials x time) of all trials
             if mouse_avg == 'trial':
-                wf_mx = mx2d(p_signal[s], d1_size = data_shape[0])[0]
+                wf_mx, wf_ids = mx2d(p_signal[s], d1_size = data_shape[0])
             # create dictionary of matrices (trials x time) for each recording or mouse
             elif mouse_avg == 'recording' or mouse_avg == 'mouse':
                 wf_avg = mx2d_dict(p_signal[s], mouse_avg, d1_size = data_shape[0])
+                wf_ids = list(wf_avg.keys())
                 # get single matrix (recording/mouse averages x time)
-                wf_mx = np.array(([np.nanmean(wf_avg[k], axis=0) for k in wf_avg.keys()]))
+                wf_mx = np.array(([np.nanmean(wf_avg[k], axis=0) for k in wf_ids]))
             else:
                 raise Exception(f'ERROR : "{mouse_avg}" is not a valid averaging method.')
                 
@@ -5580,8 +5740,18 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
             
             mx_data = np.nanmean(wf_mx, axis=0) #/ 1000  # convert uV to mV
             mx_sem = np.nanstd(wf_mx, axis=0) #/ 1000  # +/- std
+            if ci == 'sem':
+                mx_sem /= np.sqrt(wf_mx.shape[0])
             
             x = np.linspace(-np.abs(win[0]), win[1], len(mx_data))
+            # create dataframe
+            ddf = pd.DataFrame({'id':np.repeat(wf_ids, len(x)),
+                                'state':states[s],
+                                'event':'p-wave',
+                                'time':np.tile(x, len(wf_ids)),
+                                'amp':wf_mx.flatten()})
+            df = pd.concat([df,ddf], axis=0, ignore_index=True)
+            
             # plot avg waveform for each brain state
             fig = plt.figure()
             ax = plt.gca()
@@ -5590,13 +5760,15 @@ def avg_waveform(ppath, recordings, istate, win=[0.5,0.5], mode='pwaves', tstart
                 ax.fill_between(x, mx_data-mx_sem, mx_data+mx_sem, color='black', alpha=0.3)
             ax.set_xlabel('Time (s)')
             ax.set_ylabel(signal_type + ' mV')
-            ax.set_title(f'State={s}, averaged by {mouse_avg}')
+            #ax.set_title(f'State={s}, averaged by {mouse_avg}')
             if len(ylim) == 2:
                 ax.set_ylim(ylim)
             #plt.show()
+    return df
+
 
 def avg_SP(ppath, recordings, istate, win=[5,5], mode='pwaves', recalc_highres=False, 
-           tstart=0, tend=-1, pnorm=1, pcalc=0, psmooth=[True,True], vm=[(0,5),(0,5)],
+           tstart=0, tend=-1, pnorm=1, pcalc=0, psmooth=[1,1], vm=[(0,5),(0,5)],
            nsr_seg=2, perc_overlap=0.95, fmax=30, ma_thr=20, ma_state=3, flatten_is=False,
            p_iso=0, pcluster=0, clus_event='waves', mouse_avg='mouse', plaser=False, 
            post_stim=0.1, null=False, null_win=[0.5,0.5], null_match='spon', lsr_iso=0, pload=False, psave=False):
@@ -5792,7 +5964,7 @@ def avg_SP(ppath, recordings, istate, win=[5,5], mode='pwaves', recalc_highres=F
             else:
                 # plot averaged SP surrounding P-waves for dataset
                 p_mx_plot = AS.adjust_spectrogram(np.nanmean(p_mx, axis=2)[ifreq, :], pnorm, psmooth)
-                fig = plt.figure()
+                fig = plt.figure(figsize=(4,5))
                 ax = plt.gca()
                 im = ax.pcolorfast(x, freq, p_mx_plot, cmap='jet')
                 if len(vm[0]) == 2:
@@ -5802,7 +5974,8 @@ def avg_SP(ppath, recordings, istate, win=[5,5], mode='pwaves', recalc_highres=F
                 ax.set_title(f'SP surrounding P-waves ({states[s]})')
                 plt.colorbar(im, ax=ax, pad=0.0)
             #plt.show()
-            fig.suptitle('SPs averaged by ' + mouse_avg)
+            #fig.suptitle('SPs averaged by ' + mouse_avg)
+
 
 def avg_band_power(ppath, recordings, istate, bands, band_labels=[], band_colors=[], win=[5,5], 
                    mode='pwaves', recalc_highres=False, tstart=0, tend=-1, pnorm=1, pcalc=0, 
@@ -6019,6 +6192,7 @@ def avg_band_power(ppath, recordings, istate, bands, band_labels=[], band_colors
         return labels, bdict1, bdict2, x
     else:
         return labels, bdict, x
+
 
 def sp_profiles(ppath, recordings, spon_win=[1,1], frange=[6,15], recalc_highres=False, 
                 tstart=0, tend=-1, ma_thr=20, ma_state=3, flatten_is=False, nsr_seg=2, 
@@ -6240,13 +6414,13 @@ def sp_profiles(ppath, recordings, spon_win=[1,1], frange=[6,15], recalc_highres
         success_data = [(mice[i], freq[j], success_mx[i,j], 'success') for j in range(len(freq)) for i in range(success_mx.shape[0])]
         fail_data = [(mice[i], freq[j], fail_mx[i,j], 'fail') for j in range(len(freq)) for i in range(fail_mx.shape[0])]
     if plaser:
-        df = pd.DataFrame(columns=['Mouse', 'Freq', 'Pow', 'Group'], data=spon_data+null_data+lsr_data+fail_data+success_data)
+        df = pd.DataFrame(columns=['mouse', 'freq', 'pow', 'group'], data=spon_data+null_data+lsr_data+fail_data+success_data)
     else:
-        df = pd.DataFrame(columns=['Mouse', 'Freq', 'Pow', 'Group'], data=spon_data+null_data)
+        df = pd.DataFrame(columns=['mouse', 'freq', 'pow', 'group'], data=spon_data+null_data)
         
     # plot power spectrum
     plt.figure()
-    sns.lineplot(data=df, x='Freq', y='Pow', hue='Group', ci=ci, hue_order=['spon','null','lsr','fail'], 
+    sns.lineplot(data=df, x='freq', y='pow', hue='group', ci=ci, hue_order=['spon','null','lsr','fail'], 
                  palette={'null':'darkgray', 'fail':'red', 'spon':'green', 'lsr':'blue','success':'blue'})
     plt.show()
     
@@ -6255,34 +6429,35 @@ def sp_profiles(ppath, recordings, spon_win=[1,1], frange=[6,15], recalc_highres
     bins = [-1, 8, 20]
 
     stat_band_labels = [str(band) for band in stat_bands]
-    b = np.digitize(df['Freq'], bins, right=True)
+    b = np.digitize(df['freq'], bins, right=True)
     if len(stat_bands) > 1:
-        df['Band'] = [stat_band_labels[i-1] for i in b]
+        df['band'] = [stat_band_labels[i-1] for i in b]
     else:
-        df['Band'] = [stat_band_labels[0] if i==2 else 'na' for i in b]
+        df['band'] = [stat_band_labels[0] if i==2 else 'na' for i in b]
     
     # get power averages within frequency bands
     band_avgs = []
     for band in stat_band_labels:
         for group in ['spon', 'null', 'lsr', 'fail']:
             for m in mice:
-                idx = np.intersect1d(np.intersect1d(np.where(df['Mouse']==m)[0], np.where(df['Group']==group)[0]), np.where(df['Band']==band)[0])
-                band_avgs.append((m, df['Pow'].iloc[idx].mean(), group, band))
-    df2 = pd.DataFrame(band_avgs, columns=['Mouse', 'Pow', 'Group', 'Band'])
+                idx = np.intersect1d(np.intersect1d(np.where(df['mouse']==m)[0], np.where(df['group']==group)[0]), np.where(df['band']==band)[0])
+                band_avgs.append((m, df['pow'].iloc[idx].mean(), group, band))
+    df2 = pd.DataFrame(band_avgs, columns=['mouse', 'pow', 'group', 'band'])
     
     # boxplot
     plt.figure()
-    sns.boxplot(x='Group', y='Pow', order=['null','fail','spon','lsr'], data=df2, whis=np.inf, fliersize=0, 
+    sns.boxplot(x='group', y='pow', order=['null','fail','spon','lsr'], data=df2, whis=np.inf, fliersize=0, 
                 palette={'null':'gray', 'fail':'red','spon':'green','lsr':'blue'})
-    sns.pointplot(x='Group', y='Pow', hue='Mouse', order=['null','fail','spon','lsr'], data=df2, ci=None, markers='', color='black')
+    sns.pointplot(x='group', y='pow', hue='mouse', order=['null','fail','spon','lsr'], data=df2, ci=None, markers='', color='black')
     plt.ylim((0.8,1.4)); plt.gca().get_legend().remove()
     
     # stats
-    res_anova = AnovaRM(data=df2, depvar='Pow', subject='Mouse', within=['Group']).fit()
-    mc = MultiComparison(df2['Pow'], df2['Group']).allpairtest(scipy.stats.ttest_rel, method='bonf')
+    res_anova = AnovaRM(data=df2, depvar='pow', subject='mouse', within=['group']).fit()
+    mc = MultiComparison(df2['pow'], df2['group']).allpairtest(scipy.stats.ttest_rel, method='bonf')
     print(res_anova); print('p = ' + str(float(res_anova.anova_table['Pr > F']))); print(''); print(mc[0])
     
-    return df2
+    return df, df2
+
 
 def theta_pfreq(ppath, recordings, istate=2, r_theta=[6,10], r_delta=[0.5,4], 
                 thres=[40,60], ma_thr=20, ma_state=3, flatten_is=4, 
@@ -6401,6 +6576,7 @@ def theta_pfreq(ppath, recordings, istate=2, r_theta=[6,10], r_delta=[0.5,4],
         print(f'P-wave frequency during high-theta vs. low-theta bins (state={istate})')
         print(f'T={round(p.statistic,3)}, p-val={round(p.pvalue,5)}')
 
+
 def lsr_hilbert(ppath, recordings, istate, bp_filt, stat='perc', mode='pwaves',
                 min_state_dur=5, mouse_avg='mouse', ma_thr=20, ma_state=3, 
                 flatten_is=False, post_stim=0.1, bins=9, pload=False, psave=False):
@@ -6485,6 +6661,7 @@ def lsr_hilbert(ppath, recordings, istate, bp_filt, stat='perc', mode='pwaves',
             spon_p_dict[m] = list(chain.from_iterable(spon_p_dict[m]))
             success_p_dict[m] = list(chain.from_iterable(success_p_dict[m]))
             fail_p_dict[m] = list(chain.from_iterable(fail_p_dict[m]))
+            
     # create matrix of subjects x phase bins
     if mouse_avg == 'mouse' or mouse_avg == 'recording':
         lsr_p_mx = np.zeros((len(idfs), bins))
@@ -6493,6 +6670,7 @@ def lsr_hilbert(ppath, recordings, istate, bp_filt, stat='perc', mode='pwaves',
         lsr_fail_mx = np.zeros((len(idfs), bins))
         lsr_all_mx = np.zeros((len(idfs), bins))
         lsr_prob_mx = np.zeros((len(idfs), bins))
+        df = pd.DataFrame()
         for row, idf in enumerate(idfs):
             # get P-wave stats
             lsr_p_hist = np.histogram(lsr_p_dict[idf], bins=bins, range=(-3.14, 3.14))[0]           # no. laser-triggered P-waves per phase
@@ -6525,6 +6703,15 @@ def lsr_hilbert(ppath, recordings, istate, bp_filt, stat='perc', mode='pwaves',
     
     # create histograms from arrays of phase values
     elif 'trial' in mouse_avg:
+        df = pd.DataFrame()
+        for rec in recordings:
+            for event,ddict in zip(['lsr','spon','success','fail'],
+                                   [lsr_p_rec, spon_p_rec, success_p_rec, fail_p_rec]):
+                df = pd.concat([df, pd.DataFrame({'mouse' : rec.split('_')[0],
+                                                  'recording' : rec,
+                                                  'state' : istate,
+                                                  'event' : event,
+                                                  'phase' : ddict[rec]})], axis=0, ignore_index=True)
         # get all phases of events across mice/recordings
         lsr_phases = list(chain.from_iterable([lsr_p_rec[rec] for rec in recordings]))
         spon_phases = list(chain.from_iterable([spon_p_rec[rec] for rec in recordings]))
@@ -6624,10 +6811,12 @@ def lsr_hilbert(ppath, recordings, istate, bp_filt, stat='perc', mode='pwaves',
         ax3.set_xlabel('Phase')
     fig.suptitle(f'State={istate}, averaged by {mouse_avg}, stat = {stat}, bp_filt = {bp_filt}')
     plt.show()
+    return df
     
+
 def lsr_pwaves_sumstats(ppath, recordings, istate, tstart=0, tend=-1, ma_thr=20, 
                         ma_state=3, flatten_is=False, exclude_noise=False, post_stim=0.1, 
-                        p_iso=0, pcluster=0, clus_event='waves', lsr_iso=0):
+                        p_iso=0, pcluster=0, clus_event='waves', lsr_iso=0, mouse_avg='mouse'):
     """
     Get summary stats for optogenetically triggered P-wave recordings
     @Params
@@ -6654,8 +6843,8 @@ def lsr_pwaves_sumstats(ppath, recordings, istate, tstart=0, tend=-1, ma_thr=20,
         istate = [istate]
     
     # create dataframe
-    cols = ['mouse', 'recording', 'state', 'lsr p-waves', 'spon p-waves', 'total p-waves', 
-            '% lsr p-waves', 'success lsr', 'fail lsr', 'total lsr', '% success lsr']
+    cols = ['mouse', 'recording', 'state', '# lsr p-waves', '# spon p-waves', '# total p-waves', 
+            '% lsr p-waves', '# success lsr', '# fail lsr', '# total lsr', '% success lsr']
     df = pd.DataFrame(columns=cols)
     
     lsr_elim_counts = {'success':0, 'fail':0}
@@ -6726,32 +6915,34 @@ def lsr_pwaves_sumstats(ppath, recordings, istate, tstart=0, tend=-1, ma_thr=20,
         num_spon_pi = np.array([len(np.intersect1d(spon_pi, p_idx[np.where(pi_states==s)[0]])) for s in istate])
         
         # collect stats
-        ddict = {
-                 'mouse':[idf]*len(istate),
-                 'recording':[rec]*len(istate),
-                 'state':istate,
-                 'lsr p-waves':num_lsr_pi,
-                 'spon p-waves':num_spon_pi,
-                 'total p-waves':num_lsr_pi + num_spon_pi,
-                 '% lsr p-waves':np.array([(a/b)*100 if b!=0 else 0 for a,b in zip(num_lsr_pi, (num_lsr_pi+num_spon_pi))]),
-                 'success lsr':num_lsr_success,
-                 'fail lsr':num_lsr_fail,
-                 'total lsr':num_lsr_success + num_lsr_fail,
-                 '% success lsr':np.array([(a/b)*100 if b!=0 else 0 for a,b in zip(num_lsr_success, (num_lsr_success+num_lsr_fail))])
-                }
-        df = pd.concat([df, pd.DataFrame(ddict)], axis=0, ignore_index=True)
+        ddf = pd.DataFrame({'mouse':[idf]*len(istate),
+                            'recording':[rec]*len(istate),
+                            'state':istate,
+                            '# lsr p-waves' : num_lsr_pi,
+                            '# spon p-waves' : num_spon_pi,
+                            '# total p-waves' : num_lsr_pi + num_spon_pi,
+                            '% lsr p-waves' : 0,
+                            '# success lsr' : num_lsr_success,
+                            '# fail lsr' : num_lsr_fail,
+                            '# total lsr' : num_lsr_success + num_lsr_fail,
+                            '% success lsr' : 0})
+        df = pd.concat([df, ddf], axis=0, ignore_index=True)
+        
+    if mouse_avg == 'mouse':
+        df = df.iloc[:, np.where(df.columns != 'recording')[0]]
+        df = df.groupby(['mouse','state']).sum().reset_index()
+        
+    df['% lsr p-waves'] = (df['# lsr p-waves'] / df['# total p-waves']) * 100
+    df['% success lsr'] = (df['# success lsr'] / df['# total lsr']) * 100
+        
+    
     if lsr_iso > 0:
         print(f"{lsr_elim_counts['success']} successful laser pulses and {lsr_elim_counts['fail']} failed laser pulses were eliminated due to closely preceding P-waves.")
         
     return df
         
-        
-        
 
-        
-    
-
-def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, plotMode='0'):
+def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, ci='sem'):
     """
     Plot success rate of laser pulses in each brain state
     @Params
@@ -6759,6 +6950,9 @@ def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, plotMode='0'):
                failed laser pulse (output of get_lsr_stats)
     istate - brain state(s) to analyze for success rate of true laser pulses
     jstate - brain state(s) to analyze for "success rate" of sham (jittered) laser pulses
+    flatten_is - brain state for transition sleep
+    ci - error bars ('sd'=standard deviation, 'sem'=standard error, 
+                     integer between 0 and 100=confidence interval)
     @Returns
     df - dataframe containing laser success rate for each mouse in each brain state
     """
@@ -6768,7 +6962,7 @@ def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, plotMode='0'):
         states[4] = 'IS'
     mice = list(stats_df.mouse.unique())
     
-    d = {'Mouse':[], 'State':[], 'Perc':[]}
+    d = {'mouse':[], 'state':[], 'perc':[]}
     
     for s in istate:
         # calculate laser success by mouse for each brain state
@@ -6782,7 +6976,7 @@ def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, plotMode='0'):
                 perc_success = round((num_success_lsr / num_total_lsr)*100, 2)
             else:
                 perc_success = np.nan
-            d['Mouse'].append(m); d['State'].append(states[s]); d['Perc'].append(perc_success)
+            d['mouse'].append(m); d['state'].append(states[s]); d['perc'].append(perc_success)
     for s in jstate:
         # calculate "success rate" for jittered laser pulses
         state_df = stats_df.iloc[np.where(stats_df['state'] == s)[0], :]
@@ -6795,26 +6989,37 @@ def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, plotMode='0'):
                 perc_success = round((num_success_jlsr / num_total_jlsr)*100, 2)
             else:
                 perc_success = np.nan
-            d['Mouse'].append(m); d['State'].append('sham '+states[s]); d['Perc'].append(perc_success);
+            d['mouse'].append(m); d['state'].append('sham '+states[s]); d['perc'].append(perc_success);
     
     # collect state-dependent success rates and plot in bar graph
     df = pd.DataFrame(d)
+    if ci == 'sem':
+        ci = 'se'
+    elif type(ci) == int:
+        ci = ('ci',ci)
     plt.figure()
-    sns.barplot(x='State', y='Perc', data=df, ci=68, palette={'REM':'cyan','Wake':'darkviolet','NREM':'darkgray', 
-                                                              'IS':'darkblue','sham REM':'cadetblue','sham wake':'rebeccapurple',
-                                                              'sham NREM':'dimgray', 'sham IS':'darkgreen'})
-    sns.pointplot(x='State', y='Perc', hue='Mouse', data=df, ci=None, markers='', color='black')
-    plt.gca().get_legend().remove()
+    sns.barplot(x='state', y='perc', data=df, errorbar=ci, palette={'REM':'cyan',
+                                                                    'Wake':'darkviolet',
+                                                                    'NREM':'darkgray', 
+                                                                    'IS':'darkblue',
+                                                                    'sham REM':'cadetblue',
+                                                                    'sham wake':'rebeccapurple',
+                                                                    'sham NREM':'dimgray', 
+                                                                    'sham IS':'darkgreen'})
+    #sns.pointplot(x='state', y='perc', hue='mouse', data=df, ci=None, markers='', color='black')
+    lines = sns.lineplot(x='state', y='perc', hue='mouse', data=df, errorbar=None, 
+                         markersize=0, linewidth=2, legend=False)
+    _ = [l.set_color('black') for l in lines.get_lines()]
     plt.ylabel('% probability of successful laser pulse')
     plt.title('State-dependent probability of laser-triggered P-wave')
     plt.show()
     
     # stats
-    state_names = list(set(df['State']))
+    state_names = list(set(df['state']))
     # compare 2 brain states with paired t-test
     if len(state_names) == 2:
-        data1 = df['Perc'].iloc[np.where(df['State'] == state_names[0])[0]]
-        data2 = df['Perc'].iloc[np.where(df['State'] == state_names[1])[0]]
+        data1 = df['perc'].iloc[np.where(df['state'] == state_names[0])[0]]
+        data2 = df['perc'].iloc[np.where(df['state'] == state_names[1])[0]]
         p = scipy.stats.ttest_rel(data1, data2, nan_policy='omit')
         sig='yes' if p.pvalue < 0.05 else 'no'
         print('')
@@ -6822,12 +7027,13 @@ def lsr_state_success(stats_df, istate, jstate=[], flatten_is=4, plotMode='0'):
         print('')
     # compare >2 brain states with repeated measures ANOVA
     elif len(state_names) > 2:
-        res_anova = AnovaRM(data=df, depvar='Perc', subject='Mouse', within=['State']).fit()
-        mc = MultiComparison(df['Perc'], df['State']).allpairtest(scipy.stats.ttest_rel, method='bonf')
+        res_anova = AnovaRM(data=df, depvar='perc', subject='mouse', within=['state']).fit()
+        mc = MultiComparison(df['perc'], df['state']).allpairtest(scipy.stats.ttest_rel, method='bonf')
         print(res_anova); print('p = ' + str(float(res_anova.anova_table['Pr > F']))); print(''); print(mc[0])
     return df
 
-def lsr_pwave_latency(df, istate, jitter=False):
+
+def lsr_pwave_latency(df, istate, jitter=False, bins='auto', binrange=(0,100)):
     """
     Plot distribution of latencies of laser-triggered P-waves from laser onset
     @Params
@@ -6836,24 +7042,36 @@ def lsr_pwave_latency(df, istate, jitter=False):
     istate - brain state to analyze
     jitter - if True, also plot latencies of "laser-triggered P-waves" from the
               onset of sham (jittered) laser pulses
+    bins - number of bins in histogram
+    binrange - (low, high) value for histogram
     @Returns
     None
     """
-    state_df = df.iloc[np.where(df['state'] == istate)[0], :]
+    # clean data inputs
+    if type(bins) != int:
+        bins = 'auto'
+    if type(binrange) not in [list, tuple] or len(binrange) != 2:
+        binrange = None
+    
+    state_df = df.iloc[np.where(df['state'] == istate)[0], :].reset_index(drop=True)
     
     plt.figure()
     # plot P-wave latencies from both true and sham laser pulses
     if jitter:
-        sns.histplot(x='latency', hue='event', data=state_df, hue_order=['sham pwave', 'lsr-triggered pwave'], 
-                     stat='count', palette={'lsr-triggered pwave':'blue', 'sham pwave':'gray'})
+        sns.histplot(x='latency', hue='event', data=state_df, stat='count', bins=bins,
+                     binrange=binrange, hue_order=['sham pwave', 'lsr-triggered pwave'],
+                     palette={'lsr-triggered pwave':'blue', 'sham pwave':'gray'})
     # plot P-wave latencies from true laser pulses only
     else:
-        sns.histplot(x='latency', hue='event', data=state_df, hue_order=['lsr-triggered pwave'], stat='count', 
+        sns.histplot(x='latency', hue='event', data=state_df, stat='count', bins=bins,
+                     binrange=binrange, hue_order=['lsr-triggered pwave'],
                      palette={'lsr-triggered pwave':'blue'})
     plt.xlabel('Latency from laser (ms)')
     plt.ylabel('Number of laser pulses')
     plt.show()
+    return state_df
     
+
 def lsr_pwave_size(df, istate, stat='amp2', plotMode='0', mouse_avg='mouse', nbins=12):
     """
     Compare mean amplitudes/half-widths of spontaneous and laser-triggered P-waves
@@ -6989,6 +7207,7 @@ def lsr_pwave_size(df, istate, stat='amp2', plotMode='0', mouse_avg='mouse', nbi
         print(f'T={round(p.statistic,3)}, p-val={round(p.pvalue,5)}')
         print('')
 
+
 def lsr_prev_theta_success(ppath, recordings, win=[-2,0], theta_band=[6,15], mode='power', 
                            post_stim=0.1, ma_thr=20, ma_state=3, flatten_is=False, 
                            nsr_seg=2, perc_overlap=0.95, pnorm=0, psmooth=0, pcalc=0,
@@ -7106,73 +7325,72 @@ def lsr_prev_theta_success(ppath, recordings, win=[-2,0], theta_band=[6,15], mod
         fail_spectrums[rec] = [np.mean(sp, axis=1) for sp in fail_lsr[1][rec]]
     
     # get single matrix (trials x frequency) of all trials across all recordings
-    success_spectrum_mx, mice = mx2d(success_spectrums, mouse_avg)
-    fail_spectrum_mx, mice = mx2d(fail_spectrums, mouse_avg)
+    success_spectrum_mx, success_labels = mx2d(success_spectrums, mouse_avg)
+    fail_spectrum_mx, fail_labels = mx2d(fail_spectrums, mouse_avg)
+    if 'trial' in mouse_avg:
+        fail_labels += len(success_labels)
+        
     if psmooth:
         success_spectrum_mx = AS.convolve_data(success_spectrum_mx, psmooth, axis='x')
         fail_spectrum_mx = AS.convolve_data(fail_spectrum_mx, psmooth, axis='x')
     
     # store data in dataframe (1 power value per frequency per trial)
-    sdata = [(i, sp_freq[j], success_spectrum_mx[i,j], 'success') for j in range(len(sp_freq)) for i in range(success_spectrum_mx.shape[0])]
-    fdata = [(i, sp_freq[j], fail_spectrum_mx[i,j], 'fail') for j in range(len(sp_freq)) for i in range(fail_spectrum_mx.shape[0])]
-    df = pd.DataFrame(columns=['Trial', 'Freq', 'Pow', 'Group'], data=sdata+fdata)
-    f_idx = [np.where(df['Freq']==f)[0] for f in freq]
+    success_df = pd.DataFrame({'id' : np.repeat(success_labels, len(sp_freq)),
+                               'freq' : np.tile(sp_freq, len(success_labels)),
+                               'pow' : success_spectrum_mx[:,sp_ifreq].flatten(),
+                               'group' : 'success',
+                               'theta' : np.nan})
+    fail_df = pd.DataFrame({'id' : np.repeat(fail_labels, len(sp_freq)),
+                            'freq' : np.tile(sp_freq, len(fail_labels)),
+                            'pow' : fail_spectrum_mx[:,sp_ifreq].flatten(),
+                            'group' : 'fail',
+                            'theta' : np.nan})
     
-    # calculate mean theta power/frequency preceding each successful laser trial
-    success_idx = np.where(df['Group']=='success')[0]
-    success_vec = np.zeros(success_spectrum_mx.shape[0])
+    for labels,ddf in zip([success_labels, fail_labels], [success_df, fail_df]):
+        if mode == 'spectrum':
+            ddf['theta'] = -1
+            continue
+        
+        for l in labels:
+            # get power of each frequency in trial
+            rows = np.where((ddf.id == l) &
+                            (ddf.freq >= freq[0]) & 
+                            (ddf.freq <= freq[-1]))[0]
+            f_pows = np.array(ddf.loc[rows, 'pow'])
+            
+            # calculate trial mean theta power
+            if mode == 'power':
+                #success_vec[trial] = f_pows.mean()
+                d = f_pows.mean()
+            # calculate trial mean theta frequency
+            elif mode == 'mean freq':
+                # normalize each theta frequency by total power in the theta range
+                num = np.array([f*fp for (f,fp) in zip(freq,f_pows)]).sum()
+                denom = np.sum(f_pows)
+                #success_vec[trial] = round(num/denom, 3)
+                d = round(num/denom, 3)
+            ddf.loc[rows,'theta'] = d
     
-    for trial in range(success_spectrum_mx.shape[0]):
-        # get power of each frequency in trial
-        tidx = np.intersect1d(np.where(df['Trial']==trial)[0], success_idx)
-        ft_idx = np.intersect1d(f_idx, tidx)
-        f_pows = np.array((df.iloc[ft_idx, 2]))
-        # calculate trial mean theta power
-        if mode == 'power':
-            success_vec[trial] = f_pows.mean()
-        # calculate trial mean theta frequency
-        elif mode == 'mean freq':
-            # normalize each theta frequency by total power in the theta range
-            num = np.array([f*fp for (f,fp) in zip(freq,f_pows)]).sum()
-            denom = np.sum(f_pows)
-            success_vec[trial] = round(num/denom, 3)
-    
-    # calculate mean theta power/frequency preceding each failed laser trial
-    fail_idx = np.where(df['Group']=='fail')[0]
-    fail_vec = np.zeros(fail_spectrum_mx.shape[0])
-    
-    for trial in range(fail_spectrum_mx.shape[0]):
-        tidx = np.intersect1d(np.where(df['Trial']==trial)[0], fail_idx)
-        ft_idx = np.intersect1d(f_idx, tidx)
-        f_pows = df.iloc[ft_idx, 2]
-
-        # mean trial theta power
-        if mode == 'power':
-            fail_vec[trial] = f_pows.mean()
-        # mean trial theta frequency
-        elif mode == 'mean freq':
-            # normalize each theta frequency by total power in the theta range
-            num = np.array([f*fp for (f,fp) in zip(freq,f_pows)]).sum()
-            denom = np.sum(f_pows)
-            fail_vec[trial] = round(num/denom, 3)
+    df = pd.concat([success_df, fail_df], axis=0, ignore_index=True)
+    df = df.dropna(axis=0, subset=['theta']).reset_index(drop=True)
             
     ###   GRAPHS   ###
     
     if mode == 'spectrum':
         # plot power spectral densities preceding successful and failed laser pulses
-        spectrum_idx = np.intersect1d(np.where(df['Freq'] >= theta_band[0])[0], np.where(df['Freq'] <= theta_band[1])[0])
-        spectrum_df = df.iloc[spectrum_idx, :]
+        if ci == 'sem':
+            ci = 'se'
+        elif type(ci) == int:
+            ci = ('ci', ci)
         plt.figure()
-        sns.lineplot(data=spectrum_df, x='Freq', y='Pow', hue='Group', ci=ci, 
+        sns.lineplot(x='freq', y='pow', hue='group', data=df, errorbar=ci,
                      palette={'success':'blue', 'fail':'red'})
         tmp = 'Raw' if signal_type == 'SP' and pnorm == False else 'Normalized'
         plt.title(f'{tmp} power spectrum during {np.abs(win[0])}s preceding laser')
         plt.show()
-    else:   
-        # plot theta power/frequency for each successful and failed laser pulse
-        trial_df = pd.DataFrame({'group':['success']*len(success_vec), 'theta':success_vec})
-        ddict = {'group':['fail']*len(fail_vec), 'theta':fail_vec}
-        trial_df = pd.concat([trial_df, pd.DataFrame(ddict)], axis=0, ignore_index=True)
+
+    else:
+        df = df.groupby(['id','group']).mean().reset_index()
 
         plt.figure()
         tmp = 'Raw' if signal_type == 'SP' and pnorm == False else 'Normalized'
@@ -7183,18 +7401,18 @@ def lsr_prev_theta_success(ppath, recordings, win=[-2,0], theta_band=[6,15], mod
         elif mode == 'mean freq':
             title = f'Mean theta frequency during {np.abs(win[0])}s preceding laser'
         plt.title(title)
-        sns.boxplot(x='group', y='theta', data=trial_df, whis=np.inf, color='lightgray', fliersize=0)
-        sns.swarmplot(x='group', y='theta', data=trial_df, size=5, edgecolor='black', linewidth=0.8, 
+        sns.boxplot(x='group', y='theta', data=df, whis=np.inf, color='lightgray', fliersize=0)
+        sns.swarmplot(x='group', y='theta', data=df, size=5, edgecolor='black', linewidth=0.8, 
                       palette={'success':'blue', 'fail':'red'})
         
         # plot overlapping distributions of successful vs failed laser pulses
         plt.figure()
         if len(prange1)==2:
-            sns.histplot(x='theta', hue='group', data=trial_df, stat='probability', common_norm=False, 
+            sns.histplot(x='theta', hue='group', data=df, stat='probability', common_norm=False, 
                          binrange=prange1, kde=True, kde_kws={'bw_adjust':2}, fill=True, 
                          palette={'success':'blue', 'fail':'red'}, **{'linewidth':0, 'alpha':0.4})
         else:
-            sns.histplot(x='theta', hue='group', data=trial_df, stat='probability', common_norm=False, 
+            sns.histplot(x='theta', hue='group', data=df, stat='probability', common_norm=False, 
                          kde=True, kde_kws={'bw_adjust':2}, fill=True, palette={'success':'blue', 'fail':'red'}, 
                          **{'linewidth':0, 'alpha':0.4})
         if mode == 'power': plt.xlabel(f'{tmp} theta power') 
@@ -7203,6 +7421,8 @@ def lsr_prev_theta_success(ppath, recordings, win=[-2,0], theta_band=[6,15], mod
         plt.ylabel('Proportion of lsr trials')
         plt.title(title)
         
+        success_vec = np.array(df.loc[np.where(df.group=='success')[0], 'theta'])
+        fail_vec = np.array(df.loc[np.where(df.group=='fail')[0], 'theta'])
         # plot probability of laser success for each theta power/frequency bin
         success_hist, b = np.histogram(success_vec, bins=nbins, range=prange2)
         fail_hist, b = np.histogram(fail_vec, bins=nbins, range=prange2)
@@ -7232,8 +7452,11 @@ def lsr_prev_theta_success(ppath, recordings, win=[-2,0], theta_band=[6,15], mod
         if mode == 'power': print(f'PRECEDING REM THETA POWER CORRELATION')
         elif mode == 'peak freq': print(f'PRECEDING REM THETA PEAK FREQUENCY CORRELATION')
         elif mode == 'mean freq': print(f'PRECEDING REM MEAN THETA FREQUENCY CORRELATION')
-        print(f'rpb={np.round(corr.correlation,5)}, p-value={round(corr.pvalue,5)}')
+        #print(f'rpb={np.round(corr.correlation,5)}, p-value={round(corr.pvalue,5)}')
+        print(f'rpb={np.round(corr.correlation,5)}, p-value={AS.pp(corr.pvalue)[0]}')
         print('')
+    
+    return df
 
 
 
@@ -7284,6 +7507,7 @@ def bonferroni_signtest(df, alpha=0.05):
     results['reject'] = reject
     return results
 
+
 def cohen_d(x,y):
     """
     Correct if the population S.D. is expected to be equal for the two groups
@@ -7298,6 +7522,7 @@ def cohen_d(x,y):
     dof = nx + ny - 2
     es = (np.mean(x) - np.mean(y)) / np.sqrt(((nx-1)*np.std(x, ddof=1) ** 2 + (ny-1)*np.std(y, ddof=1) ** 2) / dof)
     return es
+
 
 def pairT_from_df(df, cond_col, cond1, cond2, test_cols, c1_label='', c2_label='', 
                   test_col_labels=[], nan_policy='omit', print_stats=True, print_notice=[]):
@@ -7415,6 +7640,8 @@ def stats_timecourse(mx, pre, post, sr, base_int, baseline_start=0, baseline_end
             data.append([tpoint, p.statistic, p.pvalue, p_adj, sig])
     # create stats dataframe
     df = pd.DataFrame(data = data, columns = ['time', 'T', 'p-value', 'p-adj', 'sig'])
+    df['T'] = np.round(np.array(df['T']), 2)
+    df['p-adj'] = AS.pp(df['p-adj'])
     if print_stats:
         print(df)
     return df
