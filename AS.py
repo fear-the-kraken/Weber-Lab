@@ -19,13 +19,81 @@ import math
 import pingouin as ping
 from statsmodels.stats.anova import AnovaRM
 from statsmodels.stats.multicomp import MultiComparison
+import h5py
 import pdb
+import warnings
+warnings.simplefilter('error', pd.errors.DtypeWarning)
 # custom modules
 import sleepy
 import pwaves
 
 
 #################            SUPPORT FUNCTIONS            #################
+
+def pp(data, sci_sig=2, dec_sig=3):
+    try:
+        iter(data)
+    except:
+        data = [data]
+    data = np.array(data)
+    y = []
+    for x in data:
+        if isinstance(x, str):
+            y.append(x)
+        elif x < 0.001:
+            y.append(f"{x:.{sci_sig}E}")
+        else:
+            y.append(f"{x:.{dec_sig}f}")
+    return y
+
+
+def get_snr_pwaves(ppath, name, default='NP'):
+    """
+    Load sampling rate of recording $ppath/$name from info file
+    @Returns
+    SR - sampling rate (Hz)
+    """
+    
+    fid = open(os.path.join(ppath, name, 'info.txt'), newline=None)
+    lines = fid.readlines()
+    fid.close()
+    
+    sr = None
+    np_sr = None
+    for l in lines:
+        a = re.search("^" + 'SR' + ":" + "\s+(.*)", l)  # find Intan SR
+        if a:
+            sr = float(a.group(1))
+        b = re.search("^" + 'SR_NP' + ":" + "\s+(.*)", l)  # find Neuropixel SR
+        if b:
+            np_sr = float(b.group(1))
+            
+    if np_sr is None:  # if Neuropixel SR not in info file, return Intan SR
+        return sr
+    if sr is None:     # unlikely - every recording protocol saves Intan SR
+        return np_sr
+    if default == 'Intan':  # if file contains both sampling rates, return 'default' SR
+        return sr
+    if default == 'NP':
+        return np_sr
+    return sr
+
+
+def load_eeg_emg(ppath, rec, dname='EEG'):
+    data_path = os.path.join(ppath, rec, f'{dname}.mat')
+    if os.path.exists(data_path):
+        try:
+            data = so.loadmat(data_path, squeeze_me=True)[dname]
+        except ValueError:
+            try:
+                with h5py.File(data_path, 'r') as f:
+                    data = np.squeeze(f[dname])
+            except OSError:
+                return OSError(dname + ' file must be saved in .mat or h5py format')
+    else:
+        return FileNotFoundError('No saved ' + dname + ' file found')
+    return data
+
 
 def upsample_mx(x, nbin, axis=1):
     """
@@ -63,6 +131,7 @@ def upsample_mx(x, nbin, axis=1):
             for k in range(nbin):
                 y[:, k::nbin] = x
     return y
+
 
 def downsample_vec(x, nbin):
     """
@@ -128,6 +197,7 @@ def downsample_mx(x, nbin, axis=1):
     y = x_down / nbin
     return y
 
+
 def time_morph(X, nstates):
     """
     Set size of input data to $nstates bins
@@ -149,6 +219,7 @@ def time_morph(X, nstates):
     else:
         Y = downsample_mx(A, int((m * nstates) / nstates))
     return Y
+
 
 def smooth_data(x, sig):
     """
@@ -204,6 +275,7 @@ def smooth_data(x, sig):
     res = scipy.ndimage.convolve1d(np.array(x), np.array(F))
     return res
     
+
 def smooth_data2(x, nstep):
     """
     Smooth data by replacing each of $nstep consecutive bins with their mean
@@ -220,6 +292,7 @@ def smooth_data2(x, nstep):
     x2 = x2[0:len(x)]
     
     return x2
+
 
 def convolve_data(x, psmooth, axis=2):
     """
@@ -269,6 +342,49 @@ def convolve_data(x, psmooth, axis=2):
     
     return xsmooth
 
+
+def exponential_smooth(x, exponent=2, min_weight=0.5, max_weight=1, avg_mode=0):
+    """
+    Smooth data vector using the weighted average of each point with its two neighbors. 
+    The weight of each point is inversely proportional to its exponentially scaled 
+    deviation from the surrounding point(s).
+    @Params
+    data - input vector
+    exponent - power by which to raise the deviation of each data point from its
+               neighbor(s). Bigger numbers = steeper exponential curve for scaling
+               deviations (i.e. proportionally greater impact on outlier values)
+    min_weight, max_weight - minimum and maximum values (0-1) used to weight data 
+                             points in weighted average. Smaller numbers = larger
+                             adjustments for each smoothed data element
+    avg_mode - calculate deviation of each data point compared to the preceding
+               element (-1), the following element (1), or the mean of both (0)
+    @Returns
+    x - smoothed data
+    """
+    # clean data inputs
+    if type(x) != np.ndarray:
+        x = np.array(x)
+    if len(x) < 3:
+        return x
+    # calculate deviations between each data point and its neighbor(s)
+    if avg_mode == -1:   # element minus preceding element
+        difs = np.abs(x[1:-1] - x[0:-2])
+    elif avg_mode == 1:  # element minus following element
+        difs = np.abs(x[1:-1] - x[2:])
+    elif avg_mode == 0:  # element minus mean of 2 surrounding elements
+        difs = np.abs(x[1:-1] - np.mean([x[0:-2], x[2:]], axis=0))
+        
+    # exponentiate deviations and rescale between 0 and 1
+    exp_devs = np.power(difs, exponent)
+    weights = np.interp(exp_devs, (exp_devs.min(), exp_devs.max()), (max_weight, min_weight))
+    # average each data point with its 2 neighbors, weighting inversely proportional to variance
+    wt_avg = np.average([x[1:-1], x[0:-2], x[2:]], axis=0, 
+                        weights=[weights, (1-weights)/2, (1-weights)/2])
+    x[1:-1] = wt_avg
+    
+    return x
+
+
 def sort_df(df, column, sequence, id_sort='mouse'):
     """
     Sort dataframe rows in order of $sequence
@@ -291,7 +407,9 @@ def sort_df(df, column, sequence, id_sort='mouse'):
         sorted_df = df.sort_values('tmp_rank', ascending=True)
     # remove ranking column from sorted dataframe  
     sorted_df = sorted_df.iloc[:,0:-1]
+    sorted_df.reset_index(drop=True, inplace=True)
     return sorted_df
+
 
 def fit_dff(a465, a405, sr, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=False):
     """
@@ -343,6 +461,7 @@ def fit_dff(a465, a405, sr, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=False
         
     return dff
 
+
 def calculate_dff(ppath, name, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=False):
     """
     Calculate DF/F signal for fiber photometry recording and save as DFF.mat
@@ -383,6 +502,7 @@ def calculate_dff(ppath, name, nskip=5, wcut=2, wcut405=0, perc=0, shift_only=Fa
     # save signals in .mat file
     so.savemat(os.path.join(ppath, name, 'DFF.mat'), {'t':t, '405':a405, '465':a465, 
                                                       'dff':dff, 'dffd':dffd})
+
 
 def load_recordings(ppath, trace_file, dose, pwave_channel=False):
     """
@@ -465,6 +585,7 @@ def load_recordings(ppath, trace_file, dose, pwave_channel=False):
     else:
         return ctr_list, exp_list
     
+    
 def load_surround_files(ppath, pload, istate, plaser, null, signal_type=''):
     """
     Load raw data dictionaries from saved .mat files
@@ -544,6 +665,7 @@ def load_surround_files(ppath, pload, istate, plaser, null, signal_type=''):
         except:
             print('\nUnable to load .mat files - calculating new spectrograms ...\n')
             return []
+
 
 def emg_amplitude(ppath, rec, emg_source='raw', recalc_amp=False, nsr_seg=2, 
                   perc_overlap=0.75, recalc_highres=False, r_mu=[10,500], 
@@ -763,28 +885,25 @@ def highres_spectrogram(ppath, rec, nsr_seg=2, perc_overlap=0.95, recalc_highres
             
     # calculate high-resolution SP using $nsr_seg and $perc_overlap params
     if recalc_highres:
+        
         sr = sleepy.get_snr(ppath, rec)
-        data_path = os.path.join(ppath, rec, f'{dname}.mat')
-        try:
-            data = so.loadmat(data_path, squeeze_me=True)[dname]
-        except FileNotFoundError:
-            print(f'###   ERROR: No saved {dname} file found')
-            return []
-        if exclude_noise:
-            npath = os.path.join(ppath, rec, 'p_idx.mat')
-            if os.path.isfile(npath):
-                nfile = so.loadmat(npath, squeeze_me=True)
-                k = f'{dname.lower()}_noise_idx'
-                if k in nfile.keys():
-                    print('###   WARNING: Spectrogram will include NaNs   ###')
-                    ni = np.array(nfile[k]).astype('int')
-                    data[ni] = np.nan
-                else:
-                    print('###   WARNING: Unable to exclude noise - no saved noise indices found in p_idx.mat   ###')
-            else:
-                print('###   WARNING: Unable to exclude noise - no p_idx.mat file found   ###')
+        
+        data = load_eeg_emg(ppath, rec, dname)
+        
+        # if exclude_noise:
+        #     npath = os.path.join(ppath, rec, 'p_idx.mat')
+        #     if os.path.isfile(npath):
+        #         nfile = so.loadmat(npath, squeeze_me=True)
+        #         k = f'{dname.lower()}_noise_idx'
+        #         if k in nfile.keys():
+        #             print('###   WARNING: Spectrogram will include NaNs   ###')
+        #             ni = np.array(nfile[k]).astype('int')
+        #             data[ni] = np.nan
+        #         else:
+        #             print('###   WARNING: Unable to exclude noise - no saved noise indices found in p_idx.mat   ###')
+        #     else:
+        #         print('###   WARNING: Unable to exclude noise - no p_idx.mat file found   ###')
             
-                
         # calculate spectrogram
         SPEC = scipy.signal.spectrogram(data, fs=sr, window='hanning', 
                                         nperseg=int(nsr_seg*sr), 
@@ -801,6 +920,7 @@ def highres_spectrogram(ppath, rec, nsr_seg=2, perc_overlap=0.95, recalc_highres
                              'nsr_seg'      : nsr_seg,
                              'perc_overlap' : perc_overlap})
     return SP, freq, t, nbin, dt
+
 
 def adjust_brainstate(M, dt, ma_thr=20, ma_state=3, flatten_is=False, keep_MA=[1,4,5], noise_state=2):
     """
@@ -832,6 +952,7 @@ def adjust_brainstate(M, dt, ma_thr=20, ma_state=3, flatten_is=False, keep_MA=[1
     if flatten_is:
         M[np.where((M==4) | (M==5))[0]] = flatten_is
     return M
+
 
 def adjust_spectrogram(SP, pnorm, psmooth, freq=[], fmax=False):
     """
@@ -869,6 +990,7 @@ def adjust_spectrogram(SP, pnorm, psmooth, freq=[], fmax=False):
             if len(ifreq) < SP.shape[0]:
                 SP = SP[ifreq, :]
     return SP
+
 
 def detect_emg_twitches(ppath, name, thres, thres_mode=1, min_dur=30, highres=True, 
                         nsr_seg=2, perc_overlap=0.75, recalc_highres=False):
@@ -1110,6 +1232,7 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
     ylim - set y axis limits of brain state percentage plot
     @Returns
     BS - 3D data matrix of brain state percentages (mice x time bins x brain state)
+    mice - array of mouse names, corresponding to rows in $BS
     t - array of time points, corresponding to columns in $BS
     df - dataframe of brain state percentages in time intervals before, during, and
          after laser stimulation
@@ -1241,13 +1364,14 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
             if len(ylim) == 2:
                 plt.ylim(ylim)
             ax.add_patch(matplotlib.patches.Rectangle((0,0), laser_dur, 100, 
-                                                      facecolor=[0.6, 0.6, 1], 
-                                                      edgecolor=[0.6, 0.6, 1]))
+                                                      facecolor=[0.6, 0.6, 1]))
             sleepy.box_off(ax)
             plt.xlabel('Time (s)')
             plt.ylabel('Brain state (%)')
             plt.legend()
             plt.draw()
+            dpath = '/home/fearthekraken/Dropbox/Weber/Data_Outputs/data/perc_brainstate.svg'
+            plt.savefig(dpath, format="svg")
         else:
             # plot % brain states surrounding laser for each mouse
             plt.figure(figsize=(7,7))
@@ -1259,7 +1383,6 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
                 # plot laser interval
                 ax.add_patch(matplotlib.patches.Rectangle((0, 0), laser_dur, 100, 
                                                           facecolor=[0.6, 0.6, 1], 
-                                                          edgecolor=[0.6, 0.6, 1], 
                                                           alpha=0.8))
                 # set axis limits and labels
                 plt.xlim((t[it][0], t[it][-1]))
@@ -1293,7 +1416,8 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
         plt.xlabel('Time (s)')
         plt.ylabel('Trial No.')
         sleepy.box_off(ax)
-        plt.show()
+        dpath = '/home/fearthekraken/Dropbox/Weber/Data_Outputs/data/brainstate_trials.svg'
+        plt.savefig(dpath, format="svg")
 
     # create dataframe with baseline and laser values for each trial
     ilsr   = np.where((t>=0) & (t<=laser_dur))[0]
@@ -1314,31 +1438,41 @@ def laser_brainstate(ppath, recordings, pre, post, tstart=0, tend=-1, ma_thr=20,
         state_perc = np.concatenate((BS[:,ilsr,i].mean(axis=1), BS[:,ibase,i].mean(axis=1), 
                                      BS[:,iafter,i].mean(axis=1)))*100
         state_label = [state]*len(state_perc)
-        df[state]  = state_perc  
-        df2 = df2.append(pd.DataFrame({'mouse':mice, 'state':state_label, 
-                                       'perc':state_perc, 'lsr':lsr_char}))
+        df[state]  = state_perc
+        df2 = pd.concat([df2,
+                         pd.DataFrame({'mouse':mice,
+                                       'state':state_label,
+                                       'perc':state_perc,
+                                       'lsr':lsr_char})],
+                        axis=0, ignore_index=True)
     if pplot:
         # plot bar grah of % time in each brain state during pre-laser vs. laser interval
         plt.figure()
         fig, axs = plt.subplots(2,2, constrained_layout=True)
         axs = axs.reshape(-1)
         if ci == 'sem':
-            ci = 68
+            ci = 'se'
         for i in range(len(S)):
-            sdf = df2.iloc[np.where(df2['state'] == S[i])[0], :]
-            sns.barplot(x='lsr', y='perc', order=['PRE', 'LSR'], data=sdf, ci=ci, 
+            sdf = df2.iloc[np.where(df2['state'] == S[i])[0], :].reset_index(drop=True)
+            sdf = pd.concat([sdf.iloc[np.where(sdf.lsr=='PRE')[0]], 
+                             sdf.iloc[np.where(sdf.lsr=='LSR')[0]]], 
+                             axis=0, ignore_index=True)
+            sdf.lsr = sdf.lsr.cat.remove_unused_categories()
+            sns.barplot(x='lsr', y='perc', data=sdf, errorbar=ci,
                         palette={'PRE':'gray', 'LSR':'blue'}, ax=axs[i])
-            sns.pointplot(x='lsr', y='perc', hue='mouse', order=['PRE', 'LSR'], data=sdf, 
-                          color='black', markers='', ci=None, ax=axs[i])
-            axs[i].get_legend().remove()
+            lines = sns.lineplot(x='lsr', y='perc', hue='mouse', data=sdf, errorbar=None, 
+                                 markersize=0, legend=False, ax=axs[i])
+            _ = [l.set_color('black') for l in lines.get_lines()]
             axs[i].set_title(S[i]); axs[i].set_ylabel('Amount (%)')
-        plt.show()
+        dpath = '/home/fearthekraken/Dropbox/Weber/Data_Outputs/data/laser_pwrbands.svg'
+        plt.savefig(dpath, format="svg")
 
     # stats
     clabs = ['% time spent in ' + state for state in S]
     pwaves.pairT_from_df(df, cond_col='lsr', cond1=1, cond2=0, test_cols=S, 
                          c1_label='during-laser', c2_label='pre-laser', test_col_labels=clabs)
-    return BS, t, df
+    return BS, mouse_order, t, df2, Trials
+
 
 def laser_triggered_eeg(ppath, name, pre, post, fmax, pnorm=1, psmooth=0, vm=[], tstart=0,
                         tend=-1, cond=0, harmcs=0, iplt_level=1, peeg2=False, prune_trials=False, 
@@ -1556,6 +1690,7 @@ def laser_triggered_eeg(ppath, name, pre, post, fmax, pnorm=1, psmooth=0, vm=[],
         plt.show()
     return EEGLsr, EMGLsr, freq[ifreq], t
 
+
 def laser_triggered_eeg_avg(ppath, recordings, pre, post, fmax, laser_dur, pnorm=1, psmooth=0, vm=[],
                             bands=[(0.5,4),(6,10),(11,15),(55,99)], band_labels=[], band_colors=[],
                             tstart=0, tend=-1, cond=0, harmcs=0, iplt_level=1, peeg2=False, sf=0,
@@ -1597,7 +1732,11 @@ def laser_triggered_eeg_avg(ppath, recordings, pre, post, fmax, laser_dur, pnorm
     pplot - if True, show plot
     ylim - set y axis limits for frequency band plot
     @Returns
-    None
+    EEGSpec - dictionary with EEG spectrogram for each mouse
+    PwrBands - dictionary with EEG power (mice x time bins surrounding laser) for each freq band
+    mice - list of mouse names, corresponding with rows in each $PwrBands array
+    t - list of time points, corresponding with columns in each $PwrBands array
+    df2 - dataframe with mean power of each freq band during laser vs pre-laser intervals
     """
     # clean data inputs
     if len(band_labels) != len(bands):
@@ -1738,7 +1877,8 @@ def laser_triggered_eeg_avg(ppath, recordings, pre, post, fmax, laser_dur, pnorm
         if len(ylim) == 2:
             ax.set_ylim(ylim)
         ax.legend()
-        plt.show()
+        dpath = '/home/fearthekraken/Dropbox/Weber/Data_Outputs/data/laser_eeg.svg'
+        plt.savefig(dpath, format="svg")
     
     # get indices of pre-laser, laser, and post-laser intervals
     ilsr   = np.where((t>=0) & (t<=laser_dur))[0]
@@ -1762,31 +1902,44 @@ def laser_triggered_eeg_avg(ppath, recordings, pre, post, fmax, laser_dur, pnorm
         b_pwr = np.concatenate((lsr_data, base_data, post_data))
         b_label = [l]*len(b_pwr)
         df[l] = b_pwr
-        df2 = df2.append(pd.DataFrame({'mouse':m, 'band':b_label, 'pwr':b_pwr, 'lsr':lsr_char}))
+        df2 = pd.concat([df2,pd.DataFrame({'mouse':m, 'band':b_label, 'pwr':b_pwr, 'lsr':lsr_char})], axis=0, ignore_index=True)
 
     # plot average power of each frequency band during pre-laser vs. laser interval
     if pplot:
         plt.figure()
         fig, axs = plt.subplots(2,2, constrained_layout=True)
         axs = axs.reshape(-1)
+        if ci == 'sem':
+            ci = 'se'
+        elif type(ci) == int:
+            ci = ('ci',ci)
         for i in range(len(band_labels)):
-            bdf = df2.iloc[np.where(df2['band'] == band_labels[i])[0], :]
-            sns.pointplot(x='lsr', y='pwr', order=['PRE', 'LSR'], data=bdf, markers='o', ci=ci, 
-                          palette={'PRE':'gray', 'LSR':'blue'}, ax=axs[i])
-            sns.pointplot(x='lsr', y='pwr', hue='mouse', order=['PRE', 'LSR'], data=bdf, 
-                          color='black', markers='', ci=None, ax=axs[i])
-            axs[i].get_legend().remove()
+            bdf = df2.iloc[np.where(df2['band'] == band_labels[i])[0], :].reset_index(drop=True)
+            
+            bdf = pd.concat([bdf.iloc[np.where(bdf.lsr=='PRE')[0]], 
+                             bdf.iloc[np.where(bdf.lsr=='LSR')[0]]], 
+                             axis=0, ignore_index=True)
+            bdf.lsr = bdf.lsr.cat.remove_unused_categories()
+            sns.pointplot(x='lsr', y='pwr', data=bdf, markers='o', errorbar=ci,
+                        palette={'PRE':'gray', 'LSR':'blue'}, ax=axs[i])
+            
+            lines = sns.lineplot(x='lsr', y='pwr', hue='mouse', data=bdf, errorbar=None, 
+                                 markersize=0, legend=False, ax=axs[i])
+            _ = [l.set_color('black') for l in lines.get_lines()]
             axs[i].set_title(band_labels[i])
             if pnorm == 0:
                 axs[i].set_ylabel('Power uV^2s')
             else:
                 axs[i].set_ylabel('Rel. Power')
-        plt.show()
+                axs[i].set_ylim([0.5,1.5])
+        dpath = '/home/fearthekraken/Dropbox/Weber/Data_Outputs/data/laser_eegbar.svg'
+        plt.savefig(dpath, format="svg")
     
     # stats - mean freq band power during pre-laser vs laser intervals
     clabs = [l + ' (' + str(b[0]) + '-' + str(b[1]) + ' Hz)' for b,l in zip(bands, band_labels)]
     pwaves.pairT_from_df(df, cond_col='lsr', cond1=1, cond2=0, test_cols=band_labels, 
                          c1_label='during laser', c2_label='pre-laser', test_col_labels=clabs)
+    return EEGSpec, PwrBands, mice, t, df2
 
 
 def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1,
@@ -1802,7 +1955,8 @@ def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1
     sf - smoothing factor for transition state timecourses
     offset - shift (s) of laser time points, as control
     @Returns
-    None
+    df - dataframe of IS --> REM transition probabilities for pre-laser, laser,
+         and post-laser intervals
     """
     # clean data inputs
     if type(recordings) != list:
@@ -1928,8 +2082,7 @@ def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1
     ax1.plot(t, fdata, color='red', lw=3, label='IS-W')
     ax1.fill_between(t, fdata-fyerr, fdata+fyerr, color='red', alpha=0.3)
     ax1.add_patch(matplotlib.patches.Rectangle((0,0), laser_dur, ax1.get_ylim()[1], 
-                                               facecolor=[0.6, 0.6, 1], 
-                                               edgecolor=[0.6, 0.6, 1], zorder=0))
+                                               facecolor=[0.6, 0.6, 1], zorder=0))
     sleepy.box_off(ax1)
     ax1.set_xlabel('Time (s)')
     ax1.set_ylabel('% time spent')
@@ -1953,6 +2106,9 @@ def laser_transition_probability(ppath, recordings, pre, post, tstart=0, tend=-1
     print('p = ' + str(float(res_anova.anova_table['Pr > F'])))
     print(''); print(mc[0])
     
+    return df
+    
+
 def state_online_analysis(ppath, recordings, istate=1, single_mode=False, overlap=0, 
                           ma_thr=20, ma_state=3, flatten_is=False, ylim=[], 
                           pplot=True, print_stats=True):
@@ -2097,7 +2253,7 @@ def state_online_analysis(ppath, recordings, istate=1, single_mode=False, overla
     return dataframe
 
 
-def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000, 
+def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000, resample_mice=True,
                               alpha=0.05, shuffle=True, seed=None, pplot=True):
     """
     Bootstrap mean value for each experimental condition in a dataframe
@@ -2107,6 +2263,7 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
     iv - independent variable column name (e.g. 'lsr' [0 vs 1] or 'dose' [saline vs cno])
     virus - name of virus expressed in mouse group (e.g. 'chr2' or 'hm3dq' or 'yfp')
     nboots - number of times to resample dataset using bootstrapping
+    resample_mice - if True, randomly select new sample of mice for each bootstrap iteration
     alpha - plot shows 1-$alpha confidence intervals
     shuffle - if True, randomly shuffle condition IDs and bootstrap "sham" data
     seed - if integer, set seed for shuffling condition IDs
@@ -2135,16 +2292,22 @@ def bootstrap_online_analysis(df, dv, iv, virus='', nboots=1000,
         df[f'{iv}_shuffle'] = iv_shuffle
     
     np.random.seed(None)
+
     # collect bootstrapped data (rows = bootstrap trials, cols = conditions)
     # columns: ctrl true, exp true, ctrl shuffled, exp shuffled, true dif, shuffled dif
     boot_mx = np.zeros((nboots,6))
     
     for i in range(nboots):
+        # get new sample of mice
+        if resample_mice:
+            bmice = np.random.choice(mice, size=nmice, replace=True)
+        else:
+            bmice = list(mice)
         # collect mean resampled values for each mouse (rows = mice)
         btrial = np.zeros((nmice,6))
         if i % 500 == 0:
             print('Bootstrapping trial ' + str(i) + ' of ' + str(nboots) + ' ...')
-        for midx,m in enumerate(mice):
+        for midx,m in enumerate(bmice):
             # for mouse $m, get indices of real and shuffled rows for each condition
             c0 = np.where((df.mouse==m) & (df[iv]==conditions[0]))[0]
             c1 = np.where((df.mouse==m) & (df[iv]==conditions[1]))[0]
@@ -2232,7 +2395,7 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
         
         if mode == 0:
             # get 1-$alpha confidence intervals
-            c0_yerr = [np.percentile(c0_data, (alpha2*100), np.percentile(c0_data,(1-alpha2)*100)]
+            c0_yerr = [np.percentile(c0_data,alpha2*100), np.percentile(c0_data,(1-alpha2)*100)]
             c1_yerr = [np.percentile(c1_data,alpha2*100), np.percentile(c1_data,(1-alpha2)*100)]
             # plot real data
             width = 0.4
@@ -2321,9 +2484,10 @@ def plot_bootstrap_online_analysis(df, dv, iv, mode=0, plotType='bar', alpha=0.0
         y = [ymin,ymax]
     _ = [ax.set_ylim(y) for ax in axs]
     axs[0].set_ylabel(ylabel)
-    plt.show()
+    #plt.show()
 
-def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0, 
+
+def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0, alpha=0.05,
                        grp_names = ['group1','group2'], pload=False):
     """
     Statistically compare mean bootstrapped REM duration between any two groups
@@ -2338,6 +2502,7 @@ def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0,
                   e.g. non-shuffled laser-on trials in Chr2 mice vs. shuffled laser-on trials in Chr2 mice
            if 1: compare mean REM duration differences (laser-on - laser-off)
                   e.g. non-shuffled dur. difference in Chr2 mice vs. shuffled dur. difference in Chr2 mice
+    alpha - report 1-$alpha confidence intervals
     grp_names - optional string labels for [group1, group2]
     pload - optional string specifying a filename to load the dataframe
     @Returns
@@ -2407,10 +2572,12 @@ def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0,
             nboots = len(c0_1)
         grp1_data = np.array(df[dv][idx1])[c1_1] - np.array(df[dv][idx1])[c0_1]
         grp2_data = np.array(df[dv][idx2])[c1_2] - np.array(df[dv][idx2])[c0_2]
-    
+        
     # get mean REM duration/difference
     grp1_mean = grp1_data.mean()
+    grp1_yerr = [np.percentile(grp1_data,(alpha/2.)*100), np.percentile(grp1_data,(1-alpha/2.)*100)]
     grp2_mean = grp2_data.mean()
+    grp2_yerr = [np.percentile(grp2_data,(alpha/2.)*100), np.percentile(grp2_data,(1-alpha/2.)*100)]
     # get difference between mean REM duration/difference between groups, for each bootstrap trial
     difs = grp1_data - grp2_data
     # get no. trials where group1 mean is greater than (p1) or less than/equal to (p2) the group2 mean
@@ -2420,11 +2587,18 @@ def compare_boot_stats(df, dv, iv, virus, shuffled, iv_val=[], mode=0,
     # the p-value is the probability of the less likely condition, multiplied by 2 for two-tailed test 
     pval = 2 * np.min([p1, p2])
     
+    # print stats
+    txt1 = f'{grp_names[0]} --> mean{" difference " if mode==1 else " "}= {round(grp1_mean,3)}' \
+           f', CI = [{round(grp1_yerr[0],3)}, {round(grp1_yerr[1],3)}]'
+    txt2 = f'{grp_names[1]} --> mean{" difference " if mode==1 else " "}= {round(grp2_mean,3)}' \
+           f', CI = [{round(grp2_yerr[0],3)}, {round(grp2_yerr[1],3)}]'
     print('')
-    print(f'{grp_names[0]} mean{" difference " if mode==1 else " "}--> {round(grp1_mean,3)}')
-    print(f'{grp_names[1]} mean{" difference " if mode==1 else " "}--> {round(grp2_mean,3)}')
-    print(f'P-value of difference --> {round(pval,3)}')
+    print(txt1)
+    print(txt2)
+    print(f'P-value of difference = {round(pval,5)}')
     print('')
+    
+    return grp1_data, grp2_data, pval
 
 def rem_duration(ppath, recordings, tstart=0, tend=-1):
     """
@@ -2451,6 +2625,7 @@ def rem_duration(ppath, recordings, tstart=0, tend=-1):
                                           'recording':rec, 
                                           'dur':dur})], axis=0, ignore_index=True)
     return df
+
 
 def compare_online_analysis(ppath, ctr_rec, exp_rec, istate, stat, overlap=0, 
                             ma_thr=20, ma_state=3, flatten_is=False, mouse_avg='mouse', 
@@ -2586,6 +2761,7 @@ def compare_online_analysis(ppath, ctr_rec, exp_rec, istate, stat, overlap=0,
         print('')
     return df
     
+
 def avg_sp_transitions(ppath, recordings, transitions, pre, post, si_threshold, sj_threshold, 
                        laser=0, bands=[(0.5,4), (6,10), (11,15), (55,99)], band_labels=[],
                        band_colors=[], tstart=0, tend=-1, fmax=30, pnorm=1, psmooth=0, vm=[], ma_thr=20, 
@@ -2622,7 +2798,13 @@ def avg_sp_transitions(ppath, recordings, transitions, pre, post, si_threshold, 
     sf - smoothing factor for vectors of frequency band power
     offset - shift (s) of laser time points, as control
     @Returns
-    None
+    pwrband_dicts - list of tuples with EEG power dictionaries (spon_PwrBands, lsr_PwrBands) for each transition
+                    * if $laser == True  : spon_PwrBands and lsr_PwrBands dictionaries (keys = freq bands, 
+                                           values = arrays of trials/mice x time bins) contains data for spontaneous
+                                           and laser-triggered transitions, respectively
+                    * if $laser == False : spon_PwrBands contains data for all transitions, lsr_PwrBands is empty
+    labels - list of tuples with trial #s/mouse names (spon_labels, lsr_labels), corresponding with rows in data arrays
+    t - list of time points, corresponding with columns in data arrays
     """
     # clean data inputs
     if type(recordings) != list:
@@ -2735,11 +2917,13 @@ def avg_sp_transitions(ppath, recordings, transitions, pre, post, si_threshold, 
         if laser:
             lsr_sp[sid] = lsr_sp_rec_dict
     
+    pwrband_dicts = []
+    labels = []
     # get frequency band power
     for (si,sj) in transitions:
         sid = states[si]+states[sj]
         # create 3D data matrix for SPs (freq x time bins x subject)
-        spon_sp_mx, labels = pwaves.mx3d(spon_sp[sid], mouse_avg)
+        spon_sp_mx, spon_labels = pwaves.mx3d(spon_sp[sid], mouse_avg)
         # create dictionary for freq band power (key=freq band, value=matrix of subject x time bins)
         spon_PwrBands = {b : np.zeros((spon_sp_mx.shape[2], spon_sp_mx.shape[1])) for b in bands}
         for layer in range(spon_sp_mx.shape[2]):
@@ -2756,7 +2940,7 @@ def avg_sp_transitions(ppath, recordings, transitions, pre, post, si_threshold, 
                                           psmooth=psmooth, freq=f, fmax=fmax)
         # collect laser-triggered transitions
         if laser:
-            lsr_sp_mx, labels = pwaves.mx3d(lsr_sp[sid], mouse_avg)
+            lsr_sp_mx, lsr_labels = pwaves.mx3d(lsr_sp[sid], mouse_avg)
             lsr_PwrBands = {b : np.zeros((lsr_sp_mx.shape[2], lsr_sp_mx.shape[1])) for b in bands}
             for layer in range(lsr_sp_mx.shape[2]):
                 trial_sp = lsr_sp_mx[:,:,layer]
@@ -2769,6 +2953,9 @@ def avg_sp_transitions(ppath, recordings, transitions, pre, post, si_threshold, 
                     lsr_PwrBands[b][layer, :] = band_mean
             # average/adjust spectrogram
             lsr_sp_plot = adjust_spectrogram(np.nanmean(lsr_sp_mx, axis=2), False, psmooth, f, fmax)
+        else:
+            lsr_PwrBands = {}
+            lsr_labels = []
 
         t = np.linspace(-pre, post, spon_sp_plot.shape[1])
         freq = f[ifreq]
@@ -2841,7 +3028,14 @@ def avg_sp_transitions(ppath, recordings, transitions, pre, post, si_threshold, 
             # set equal y axis limits
             y = (min([ax2.get_ylim()[0], ax4.get_ylim()[0]]), max([ax2.get_ylim()[1], ax4.get_ylim()[1]]))
             ax2.set_ylim(y); ax4.set_ylim(y)
+        
+        pwrband_dicts.append((spon_PwrBands, lsr_PwrBands))
+        labels.append((spon_labels, lsr_labels))
+        
     plt.show()
+    
+    return pwrband_dicts, labels, t
+
 
 def sleep_spectrum_simple(ppath, recordings, istate=1, pnorm=0, pmode=1, fmax=30, tstart=0, tend=-1,  
                           ma_thr=20, ma_state=3, flatten_is=False, noise_state=0, mu=[10,100], ci='sd', 
@@ -3066,8 +3260,8 @@ def sleep_spectrum_simple(ppath, recordings, istate=1, pnorm=0, pmode=1, fmax=30
             sdf_amp['lsr'] = ['no'] * len(mice) 
         sdf['state'] = state
         sdf_amp['state'] = state
-        df = df.append(sdf)
-        df_amp = df_amp.append(sdf_amp)
+        df = pd.concat([df,sdf], axis=0, ignore_index=True)
+        df_amp = pd.concat([df_amp,sdf_amp], axis=0, ignore_index=True)
             
         # plot power spectrum(s)
         if pplot:
@@ -3089,6 +3283,7 @@ def sleep_spectrum_simple(ppath, recordings, istate=1, pnorm=0, pmode=1, fmax=30
             plt.title(f'Power spectral density during {state}')
             plt.show()
     return ps_mx, freq, df, df_amp
+
 
 def compare_power_spectrums(ppath, rec_list, cond_list, istate, pnorm=0, pmode=0, fmax=30, 
                             tstart=0, tend=-1, ma_thr=20, ma_state=3, flatten_is=4, 
@@ -3181,9 +3376,10 @@ def hypno_colormap():
     cmap = plt.cm.jet
     my_map = cmap.from_list('brs', rgb_colors, len(rgb_colors))
     vmin = 0
-    vmax = 6
+    vmax = 7
 
     return my_map, vmin, vmax
+
 
 def colorcode_mice(names, return_colorlist=False):   
     """
@@ -3252,10 +3448,11 @@ def filter_signal(data, sr, f1, f2=None):
             return
     return filt
 
+
 def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_is=False,
                  eeg_nbin=1, eeg_filt=[], emg_nbin=1, emg_filt=[], lfp_nbin=17, dff_nbin=250, highres=False,
                  recalc_highres=True, nsr_seg=2.5, perc_overlap=0.8, pnorm=0, psmooth=0,
-                 fmax=30, vm=[], cmap='jet', ylims=[], add_boxes=[]):
+                 fmax=30, vm=[], cmap='jet', ylims=[], add_boxes=[], return_data=False):
     """
     Plot any combination of available signals on the same time scale
     @Params
@@ -3271,7 +3468,8 @@ def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_
                                    * to plot P-wave detection threshold, add '_THRES'
                                    * to label detected P-waves, add '_ANNOT'
            'DFF'                 - DF/F signal
-           'LSR'                 - laser stimulation train
+           'LSR'                 - laser stimulation pulse trains
+           'LSR_DN'              - downsampled laser stimulation train
            'AUDIO'               - audio stimulation train
            'PULL'                - head pulls for REM sleep deprivation
 	   
@@ -3298,7 +3496,7 @@ def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_
     ylims = optional list of y axis limits for each plot
     add_boxes - optional list of tuples specifying (start, end) time points (s) to highlight with red box
     @Returns
-    None 
+    if $return_data is True, returns $pplot dictionary of plotted items; otherwise, none
     """
     
     pplot = dict.fromkeys(PLOT, None)
@@ -3367,6 +3565,24 @@ def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_
         fourier_end = int(round((intan_end+f_adjust[intan_end])/sp_nbin))
         SP2_cut = SP2[:, fourier_start:fourier_end]
         pplot['SP2'] = SP2_cut
+    
+    
+    if 'EMG_AMP' in PLOT:
+        SPEMG = so.loadmat(os.path.join(ppath, rec, 'msp_%s.mat' % rec))
+        mSP = SPEMG['mSP']
+        mfreq = SPEMG['freq'][0]
+        mt = SPEMG['t'][0]
+        msp_dt = SPEMG['dt'][0][0]
+        msp_nbin = msp_dt*sr
+        # EMG amplitude = square root of (integral over each frequency)
+        imfreq = np.where((mfreq >= 10) & (mfreq <= 100))[0]
+        EMGAmpl = np.sqrt(mSP[imfreq,:].sum(axis=0) * (mfreq[1] - mfreq[0]))
+        
+        fourier_start = int(round((intan_start+f_adjust[intan_start])/msp_nbin))
+        fourier_end = int(round((intan_end+f_adjust[intan_end])/msp_nbin))
+        EMGAmpl_cut = EMGAmpl[fourier_start:fourier_end]
+        pplot['EMG_AMP'] = EMGAmpl_cut
+    
     
     if 'SP' not in PLOT and 'SP2' not in PLOT:
         sp_dt = 2.5 if not highres else 0.0
@@ -3454,6 +3670,15 @@ def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_
         LSR_cut = LSR[intan_start:intan_end]
         pplot['LSR'] = LSR_cut
     
+    if 'LSR_DN' in PLOT:
+        # load, downsample, & collect laser stimulation vector
+        LSR_DN = sleepy.load_laser(ppath, rec)
+        (start_idx, end_idx) = sleepy.laser_start_end(LSR_DN, sr)
+        for (i,j) in zip(start_idx, end_idx):
+            LSR_DN[i:j+1] = 1
+        LSR_DN_cut = LSR_DN[intan_start:intan_end]
+        pplot['LSR_DN'] = LSR_DN_cut
+    
     if 'AUDIO' in PLOT:
         # load & collect audio stimulation vector
         AUDIO = load_audio(ppath, rec)
@@ -3521,7 +3746,7 @@ def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_
                     ax.set_ylim(y)
                 if data_type == 'DFF':
                     ax.set_ylabel('DF/F (%)')
-                elif data_type == 'LSR':
+                elif data_type in ['LSR','LSR_DN']:
                     ax.set_ylabel('Laser')
                 elif data_type == 'AUDIO':
                     ax.set_ylabel('Audio')
@@ -3537,6 +3762,10 @@ def plot_example(ppath, rec, PLOT, tstart, tend, ma_thr=20, ma_state=3, flatten_
     axs[-1].set_xlabel('Time (s)')
     
     plt.show()
+    
+    if return_data:
+        return pplot
+
 
 def draw_boxes(axs, coors):
     """
@@ -3566,6 +3795,7 @@ def draw_boxes(axs, coors):
         axs[-1].add_artist(line_l)
         axs[-1].add_artist(line_r)
 
+
 def get_unique_labels(ax):
     """
     Add legend of all uniquely labeled plot elements
@@ -3578,6 +3808,7 @@ def get_unique_labels(ax):
     l_idx = list( dict.fromkeys([l.index(x) for x in l]) )
     legend = ax.legend(handles=[h[i] for i in l_idx], labels=[l[i] for i in l_idx], framealpha=0.3)
     ax.add_artist(legend)
+
 
 def legend_mice(ax, mouse_names, symbol='', loc=''):
     """
@@ -3612,6 +3843,7 @@ def legend_mice(ax, mouse_names, symbol='', loc=''):
                        labels=[l[i] for i in unique_mice], framealpha=0.3)
     ax.add_artist(legend)
 
+
 def legend_lines(ax, skip=[], loc=0):
     """
     Add legend of all uniquely labeled lines in plot
@@ -3630,6 +3862,7 @@ def legend_lines(ax, skip=[], loc=0):
     legend = ax.legend(handles=[h[i] for i in line_idx], labels=[l[i] for i in line_idx], framealpha=0.3, loc=loc)
     ax.add_artist(legend)
     
+
 def legend_bars(ax, loc=0):
     """
     Add legend of all uniquely labeled bars in plot
@@ -3647,6 +3880,7 @@ def legend_bars(ax, loc=0):
         ax.add_artist(legend)
     else:
         print('***No labeled bar containers found in these axes.')
+
 
 def label_bars(ax, text=[], y_pos=[], above=0, dec=0, box=False):
     """
@@ -3692,6 +3926,7 @@ def label_bars(ax, text=[], y_pos=[], above=0, dec=0, box=False):
     # pad ymax so text doesn't run off graph
     ypad = np.abs(ax.get_ylim()[0] - ax.get_ylim()[1])*0.2
     ax.set_ylim([ax.get_ylim()[0], ax.get_ylim()[1]+ypad])
+
 
 def create_auto_title(brainstates=[], group_labels=[], add_lines=[]):
     """
@@ -3749,3 +3984,32 @@ def create_auto_title(brainstates=[], group_labels=[], add_lines=[]):
         if title.split('\n')[-1] == '':
             title = title[0:-1]
     return title
+
+
+def print_anova(res_anova, mc1, mc2=None, mc1_msg='', mc2_msg='', alpha=0.05, print_ns=False):
+    """
+    Print results of ANOVA and post-hoc tests
+    """
+    for pcol in ['p-unc', 'p-corr', 'p-GG-corr']:
+        if pcol in res_anova.columns:
+            res_anova[pcol] = pp(res_anova[pcol])
+        if pcol in mc1.columns:
+            mc1[pcol] = pp(mc1[pcol])
+        if mc2 is not None and pcol in mc2.columns:
+            mc2[pcol] = pp(mc2[pcol])
+    txt1 = 'ANOVA SUMMARY'
+    print('\n' + '='*len(txt1) + '\n' + txt1 + '\n' + '='*len(txt1) + '\n')
+    print(res_anova.to_string())
+    
+    sig = any([float(x) < alpha for x in res_anova['p-unc']])
+    if sig==True or print_ns==True:
+        txt2 = 'POST-HOC TESTS'
+        print('\n\n' + '='*len(txt2) + '\n' + txt2 + '\n' + '='*len(txt2) + '\n')
+        if mc1_msg:
+            print('###   ' + str(mc1_msg) + '   ###\n')
+        print(mc1.to_string())
+        if mc2 is not None:
+            print('\n\n')
+            if mc2_msg:
+                print('###   ' + str(mc2_msg) + '   ###\n')
+            print(mc2.to_string())
