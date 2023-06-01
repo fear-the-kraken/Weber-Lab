@@ -26,7 +26,7 @@ import pqt_items as pqi
 from pqt_plotwindow import FigureWindow
 from pqt_emgwindow import EMGTwitchWindow
 
-
+#%%
 def get_cycles(ppath, name):
     """
     Extract the time points where dark/light periods start and end
@@ -194,30 +194,6 @@ def load_trigger(ppath, name):
     return triggered
 
 
-def downsample_sd(x, length, nbin, noise_idx=[], replace_nan=np.nan):
-    """
-    Calculate standard deviation for $length sets of $nbin consecutive data points
-    @Params
-    x - data signal
-    length - number of elements in downsampled vector
-    nbin - number of data points per downsampled bin
-    noise_idx - list of "noisy" indices in $x; conserved in output vector
-    replace_nan - value to use for noisy bins
-    @Returns
-    sd_dn - downsampled vector of standard deviations
-    """
-    # replace noisy data indices with NaNs
-    if len(noise_idx) > 0:
-        x[noise_idx] = np.nan
-    # calculate st. dev of each sample bin
-    i = np.array(range(0,length+1)*nbin, dtype='int')
-    sd_dn = np.array([np.std(x[a:b]) for a,b in zip(i[0:-1],i[1:])])
-    # replace NaNs with alternative value
-    inan = np.nonzero(np.isnan(sd_dn))
-    sd_dn[inan] = replace_nan
-    return sd_dn
-
-
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, ppath, name):
         """
@@ -227,6 +203,7 @@ class MainWindow(QtWidgets.QMainWindow):
         name - recording folder
         """
         QtWidgets.QMainWindow.__init__(self)
+        self.setObjectName('pwaves_qt')
         self.WIDTH, self.HEIGHT = pyautogui.size()
         self.setGeometry(QtCore.QRect(20, 20, self.WIDTH, self.HEIGHT))
         self.setWindowIcon(QtGui.QIcon("icons/pwave_icon.png"))
@@ -340,7 +317,7 @@ class MainWindow(QtWidgets.QMainWindow):
             
             ### LIVE GRAPHS LAYOUT ###
             self.plotView = pg.GraphicsLayoutWidget(parent=self)
-            self.lay_brainstate = self.plotView.addLayout() 
+            self.lay_brainstate = self.plotView.addLayout()
             # laser / annotation history / current timepoint
             self.graph_treck = pg.PlotItem()
             self.lay_brainstate.addItem(self.graph_treck)
@@ -861,14 +838,17 @@ class MainWindow(QtWidgets.QMainWindow):
                            ('P-wave spectrum', 'rgba(15,7,245,100)', ['recordPwaves']),
                            ('P-wave EMG', 'rgba(0,205,102,100)', ['recordPwaves', 'hasEMG']),
                            ('Laser P-wave stats', 'rgba(84,44,45,70)', ['recordPwaves', 'lsrTrigPwaves']), 
+                           ('P-wave transitions\n(absolute)', 'rgba(255,170,60,150)', ['recordPwaves']),
                            ('P-wave transitions\n(time-normalized)', 'rgba(0,0,0,255)', ['recordPwaves']), 
-                           ('P-wave DF/F', 'rgba(172,237,138,100)', ['recordPwaves', 'hasDFF']),
-                           ('Sleep timecourse',  'rgba(196,52,24,100)', []), 
+                           ('P-wave \u0394F/F', 'rgba(172,237,138,100)', ['recordPwaves', 'hasDFF']),
+                           ('\u0394F/F activity', 'rgba(70,49,148,100)', ['hasDFF']),
+                           ('\u0394F/F transitions\n(time-normalized)', 'rgba(196,52,24,100)', ['hasDFF']),
+                           ('Sleep timecourse',  'rgba(28,95,210,150)', []), 
                            ('Sleep spectrum', 'rgba(250,250,250,150)', []), 
                            ('Opto brain state', 'rgba(70,49,148,100)', ['ol']), 
                            ('EMG twitches', 'rgba(86,245,234,100)', ['hasEMG'])]
             self.plotBtns_dict = {name:{'btn':None, 'label':None, 'color':color} for name,color,_ in plotBtn_ids}
-            self.singlePlotBtns = ['P-wave spectrogram', 'P-wave EMG', 'P-wave DF/F']
+            self.singlePlotBtns = ['P-wave spectrogram', 'P-wave EMG', 'P-wave \u0394F/F']
             # one container widget for every 5 plot buttons
             self.plotBtn_widgets = []
             for iWidget in np.arange(0, len(plotBtn_ids), 5):
@@ -1404,7 +1384,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thidx_dn[thdn] = 1
         
         # calculate binned STD of processed LFP (excluding noise indices)
-        self.LFP_std_dn = downsample_sd(np.array(self.LFP_processed), 
+        self.LFP_std_dn = pqi.downsample_sd(np.array(self.LFP_processed), 
                                         length=self.M.shape[1], nbin=self.fbin, 
                                         noise_idx=np.array(self.noise_idx), replace_nan=np.nan)
         # enable option to calculate noise-excluded SP if EEG noise indices are marked
@@ -1499,12 +1479,12 @@ class MainWindow(QtWidgets.QMainWindow):
             idx = calc_noise_idx.astype('int')
         else:
             # combine previously detected/annotated noise with new indices
-            idx = np.sort(np.unique(np.append(idx, calc_noise_idx)))
+            idx = np.unique(np.append(idx, calc_noise_idx))
             idx = np.array(idx, dtype='int')
         # update noise indices for the current signal
         if sig == 'LFP':
             self.noise_idx = idx
-            self.LFP_std_dn = downsample_sd(np.array(self.LFP_processed), 
+            self.LFP_std_dn = pqi.downsample_sd(np.array(self.LFP_processed), 
                                             length=self.M.shape[1], nbin=self.fbin, 
                                             noise_idx=idx, replace_nan=np.nan)
         elif sig == 'EMG':
@@ -1690,18 +1670,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 inoise = np.array(self.eeg_noise_idx); c = (252,186,3)
             if inoise.size > 0:
                 inoise_dn = np.unique(np.rint(np.divide(inoise, self.fbin))).astype('int')
-                #inoise_seqs = sleepy.get_sequences(inoise_dn.astype('int'))
-                #noise_dn = np.zeros((self.ftime.shape[0],))
-                #noise_dn[inoise_dn] = 0.2
+                if inoise_dn[-1] == 7201:
+                    inoise_dn = inoise_dn[0:-1]
                 self.graph_treck.plot(self.ftime[inoise_dn]*scale, 
                                       np.zeros((len(inoise_dn),)), pen=None, symbol='s', 
                                       symbolPen=c, symbolBrush=c, symbolSize=5)
-                # for ins in inoise_seqs:
-                #     print('hi')
-                    # self.graph_treck.plot(self.ftime[ins]*scale, 
-                    #                        np.zeros((len(ins),)),
-                    #                        pen=pg.mkPen(color=c, width=10))
-        
         
         # plot currently annotated point
         self.graph_treck.plot([self.ftime[self.index]*scale + 0.5*self.fdt*scale], 
@@ -1798,7 +1771,7 @@ class MainWindow(QtWidgets.QMainWindow):
         yax.setTicks([[(0, '0'), (10, '10'), (20, '20')]])
         yax.setWidth(int(pqi.px_w(50, self.WIDTH)))
         
-        # plot data vector(sf) in FFT time
+        # plot data vector(s) in FFT time
         self.graph_emgampl.clear()
         self.freqband_label.setParentItem(None)
             
@@ -3010,11 +2983,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # calculate power of frequency bands
         self.band_pointer = -1
-        # self.bands = {'delta':[0.5, 4.5], 'theta':[6, 9.5], 'high-theta':[8,15],
-        #               'sigma':[10, 15], 'beta':[15.5, 20], 'gamma':[50,55]}
-        
         self.band_pwrs = []
-        #for b in self.bands.values():
         band_ranges = [b[1] for b in self.bands]
         for b in band_ranges:
             f1 = np.where(self.freq >= b[0])[0]
@@ -3267,9 +3236,12 @@ elif len(params) == 1:
 else:
     ppath = params[0]
     name  = params[1]
-    
-ppath = '/home/fearthekraken/Documents/Data/photometry'
-name = 'Stefan_032519n2'
+
+#ppath = '/home/fearthekraken/Documents/Data/photometry'
+#ppath = '/media/fearthekraken/Mandy_HardDrive1/nrem_transitions/'
+ppath = '/home/fearthekraken/Documents/Data/sleepRec_processed/'
+#name = 'Bryant_081720n1'
+name = 'Kentucky_112618n1'
 
 app = QtWidgets.QApplication([])
 app.setStyle('Fusion')
